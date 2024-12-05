@@ -45,7 +45,7 @@ def strassen_kernel_fp32_accum(
     B_12 = tl.load(b_ptrs_2, mask = (row_offs[:, None] < A_m) & ((col_offs + HALF_BLOCK)[None, :] < A_n), other = 0.)
     B_21 = tl.load(b_ptrs_3, mask = ((row_offs + HALF_BLOCK)[:, None] < A_m) & (col_offs[None, :] < A_n), other = 0.)
     B_22 = tl.load(b_ptrs_4, mask = ((row_offs + HALF_BLOCK)[:, None] < A_m) & ((col_offs + HALF_BLOCK)[None, :] < A_n), other = 0.)
-    
+   
     # compute value blocks
     M1 = tl.dot(A_11 + A_22, B_11 + B_22)
     M2 = tl.dot(A_21 + A_22, B_11)
@@ -69,15 +69,20 @@ def run_strassen_fp32_accum(A, B, C, BLOCK_SIZE=64):
     grid = ((m*n) // (BLOCK_SIZE * BLOCK_SIZE),)
     strassen_kernel_fp32_accum[grid](A, B, C, m, n, a_stride_m, a_stride_n, BLOCK_SIZE, BLOCK_SIZE // 2)
 
-
-if __name__ == "__main__":
+def strassens_test() -> None:
+    torch.manual_seed(3331)
 
     a = torch.randn((512, 512)).cuda()
     b = torch.randn((512, 512)).cuda()
     c = torch.zeros_like(a).cuda()
     
-    print("gt matmul")
+    print("gt mat mul")
     print(a @ b)
-    print("strassen computed matmul")
+    print("strassen's mat mul")
     run_strassen_fp32_accum(a, b, c)
     print(c)
+
+    assert torch.allclose(a @ b, c, atol=1e-6), "did not match gt" 
+
+if __name__ == "__main__":
+    strassens_test()
