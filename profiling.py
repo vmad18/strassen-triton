@@ -16,13 +16,13 @@ def benchmark_matmul(
     b = torch.randn((K, N), device=device, dtype=torch.float32)
     c = torch.zeros((M, N), device=device, dtype=torch.float32)
 
-    torch_c = torch.matmul(a, b)
+    gt_mm = torch.matmul(a, b)
 
-    for _ in range(num_warmup):
-        c.zero_()
-        run_strassen_fp32_accum(a, b, c)
-        run_matmul_fp32_accum(a, b, c)
-        torch.matmul(a, b)
+    # for _ in range(num_warmup):
+    #     c.zero_()
+    #     run_strassen_fp32_accum(a, b, c)
+    #     run_matmul_fp32_accum(a, b, c)
+    #     torch.matmul(a, b)
 
     torch.cuda.synchronize()
 
@@ -53,7 +53,7 @@ def benchmark_matmul(
         end = time.perf_counter()
         torch_times.append(end - start)
 
-    max_diff = torch.max(torch.abs(c - torch_c)).item()
+    max_diff = torch.max(torch.abs(c - gt_mm)).item()
 
     triton_strassen_avg = sum(triton_strassen_times) / len(triton_strassen_times)
     triton_mm_avg = sum(triton_mm_times) / len(triton_mm_times)
