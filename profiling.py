@@ -10,7 +10,7 @@ def benchmark_matmul(
         num_runs: int = 100,
         device: str = "cuda"
 ) -> dict:
-    torch.manual_seed(3331)
+    # torch.manual_seed(3331)
 
     a = torch.randn((M, K), device=device, dtype=torch.float32)
     b = torch.randn((K, N), device=device, dtype=torch.float32)
@@ -18,11 +18,11 @@ def benchmark_matmul(
 
     gt_mm = torch.matmul(a, b)
 
-    # for _ in range(num_warmup):
-    #     c.zero_()
-    #     run_strassen_fp32_accum(a, b, c)
-    #     run_matmul_fp32_accum(a, b, c)
-    #     torch.matmul(a, b)
+    for _ in range(num_warmup):
+        c.zero_()
+        run_strassen_fp32_accum(a, b, c)
+        run_matmul_fp32_accum(a, b, c)
+        torch.matmul(a, b)
 
     torch.cuda.synchronize()
 
@@ -30,28 +30,34 @@ def benchmark_matmul(
     for _ in range(num_runs):
         c.zero_()
         start = time.perf_counter()
-        run_matmul_fp32_accum(a, b, c)
-        torch.cuda.synchronize()
+        run_strassen_fp32_accum(a, b, c, 64)
+
         end = time.perf_counter()
         triton_strassen_times.append(end - start)
+
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
 
     triton_mm_times = []
     for _ in range(num_runs):
         c.zero_()
         start = time.perf_counter()
-        run_strassen_fp32_accum(a, b, c)
-        torch.cuda.synchronize()
+        run_matmul_fp32_accum(a, b, c)
+
         end = time.perf_counter()
         triton_mm_times.append(end - start)
 
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
 
     torch_times = []
     for _ in range(num_runs):
         start = time.perf_counter()
         torch.matmul(a, b)
-        torch.cuda.synchronize()
         end = time.perf_counter()
         torch_times.append(end - start)
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
 
     max_diff = torch.max(torch.abs(c - gt_mm)).item()
 
@@ -91,8 +97,8 @@ def profile_mats():
     for size in sizes:
         results = benchmark_matmul(
             M=size, N=size, K=size,
-            num_warmup=5,
-            num_runs=50
+            num_warmup=0,
+            num_runs=250
         )
 
         print(f"{size:>6} | "
