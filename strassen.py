@@ -16,7 +16,7 @@ def strassen_2_layer_fp32_accum(
     base_m = pid_m * BLOCK_SIZE
     base_n = pid_n * BLOCK_SIZE
 
-    # Initialize 16 accumulators explicitly
+    # init 16 accumulators
     acc_11 = tl.zeros((QUARTER_BLOCK, QUARTER_BLOCK), dtype=tl.float32)
     acc_12 = tl.zeros((QUARTER_BLOCK, QUARTER_BLOCK), dtype=tl.float32)
     acc_13 = tl.zeros((QUARTER_BLOCK, QUARTER_BLOCK), dtype=tl.float32)
@@ -34,13 +34,12 @@ def strassen_2_layer_fp32_accum(
     acc_43 = tl.zeros((QUARTER_BLOCK, QUARTER_BLOCK), dtype=tl.float32)
     acc_44 = tl.zeros((QUARTER_BLOCK, QUARTER_BLOCK), dtype=tl.float32)
 
-    # Row offsets
+    # quarter offsets
     row_offs1 = base_m + tl.arange(0, QUARTER_BLOCK)
     row_offs2 = base_m + QUARTER_BLOCK + tl.arange(0, QUARTER_BLOCK)
     row_offs3 = base_m + 2 * QUARTER_BLOCK + tl.arange(0, QUARTER_BLOCK)
     row_offs4 = base_m + 3 * QUARTER_BLOCK + tl.arange(0, QUARTER_BLOCK)
 
-    # Column offsets
     col_offs1 = base_n + tl.arange(0, QUARTER_BLOCK)
     col_offs2 = base_n + QUARTER_BLOCK + tl.arange(0, QUARTER_BLOCK)
     col_offs3 = base_n + 2 * QUARTER_BLOCK + tl.arange(0, QUARTER_BLOCK)
@@ -72,6 +71,7 @@ def strassen_2_layer_fp32_accum(
         a_ptrs_43 = A_ptr + row_offs4[:, None] * A_stride_m + k_offs3[None, :] * A_stride_k
         a_ptrs_44 = A_ptr + row_offs4[:, None] * A_stride_m + k_offs4[None, :] * A_stride_k
 
+        # load A blocks
         A_11 = tl.load(a_ptrs_11, mask=(row_offs1[:, None] < M) & (k_offs1[None, :] < K), other=0.)
         A_12 = tl.load(a_ptrs_12, mask=(row_offs1[:, None] < M) & (k_offs2[None, :] < K), other=0.)
         A_13 = tl.load(a_ptrs_13, mask=(row_offs1[:, None] < M) & (k_offs3[None, :] < K), other=0.)
@@ -112,6 +112,7 @@ def strassen_2_layer_fp32_accum(
         b_ptrs_43 = B_ptr + k_offs4[:, None] * A_stride_m + col_offs3[None, :] * A_stride_k
         b_ptrs_44 = B_ptr + k_offs4[:, None] * A_stride_m + col_offs4[None, :] * A_stride_k
 
+        # load B blocks
         B_11 = tl.load(b_ptrs_11, mask=(k_offs1[:, None] < K) & (col_offs1[None, :] < N), other=0.)
         B_12 = tl.load(b_ptrs_12, mask=(k_offs1[:, None] < K) & (col_offs2[None, :] < N), other=0.)
         B_13 = tl.load(b_ptrs_13, mask=(k_offs1[:, None] < K) & (col_offs3[None, :] < N), other=0.)
@@ -132,28 +133,75 @@ def strassen_2_layer_fp32_accum(
         B_43 = tl.load(b_ptrs_43, mask=(k_offs4[:, None] < K) & (col_offs3[None, :] < N), other=0.)
         B_44 = tl.load(b_ptrs_44, mask=(k_offs4[:, None] < K) & (col_offs4[None, :] < N), other=0.)
 
+        A_11_22_sum = A_11 + A_22
+        B_11_22_sum = B_11 + B_22
+        A_21_22_sum = A_21 + A_22
+        B_12_22_sub = B_12 - B_22
+        B_21_11_sub = B_21 - B_11
+        A_11_12_sum = A_11 + A_12
+        A_21_11_sub = A_21 - A_11
+        B_11_12_sum = B_11 + B_12
+        A_12_22_sub = A_12 - A_22
+        B_21_22_sub, = B_21 + B_22
+
+        A_13_24_sum = A_13 + A_24
+        B_31_42_sum = B_31 + B_42
+        A_23_24_sum = A_23 + A_24
+        B_32_42_sub = B_32 - B_42
+        B_41_31_sub = B_41 - B_31
+        A_13_14_sum = A_13 + A_14
+        A_23_13_sub = A_23 - A_13
+        B_31_32_sum = B_31 + B_32
+        A_14_24_sub = A_14 - A_24
+        B_41_42_sum = B_41 + B_42
+
+        A_31_42_sum = A_31 + A_42
+        A_41_42_sum = A_41 + A_42
+        A_31_32_sum = A_31 + A_32
+        A_41_31_sub = A_41 - A_31
+        A_32_42_sub = A_32 - A_42
+
+        A_33_44_sum = A_33 + A_44
+        A_43_44_sum = A_43 + A_44
+        A_33_34_sum = A_33 + A_34
+        A_43_33_sub = A_43 - A_33
+        A_34_44_sub = A_34 - A_44
+
+        B_13_24_sum = B_13 + B_24
+        B_14_24_sub = B_14 - B_24
+        B_23_13_sub = B_23 - B_13
+        B_13_14_sum = B_13 + B_14
+        B_23_24_sum = B_23 + B_24
+
+        B_33_44_sum = B_33 + B_44
+        B_43_44_sum = B_43 + B_44
+        B_34_44_sub = B_34 - B_44
+        B_43_33_sub = B_43 - B_33
+        B_33_34_sum = B_33 + B_34
+        
         # C_11
         #####################################
-        M1 = tl.dot(A_11 + A_22, B_11 + B_22)
-        M2 = tl.dot(A_21 + A_22, B_11)
-        M3 = tl.dot(A_11, B_12 - B_22)
-        M4 = tl.dot(A_22, B_21 - B_11)
-        M5 = tl.dot(A_11 + A_12, B_22)
-        M6 = tl.dot(A_21 - A_11, B_11 + B_12)
-        M7 = tl.dot(A_12 - A_22, B_21 + B_22)
+    
+        M1 = tl.dot(A_11_22_sum, B_11_22_sum)
+        M2 = tl.dot(A_21_22_sum, B_11)
+        M3 = tl.dot(A_11, B_12_22_sub)
+        M4 = tl.dot(A_22, B_21_11_sub)
+        M5 = tl.dot(A_11_12_sum, B_22)
+        M6 = tl.dot(A_21_11_sub, B_11_12_sum)
+        M7 = tl.dot(A_12_22_sub, B_21_22_sub)
 
         acc_11 += M1 + M4 - M5 + M7
         acc_12 += M3 + M5
         acc_21 += M2 + M4
         acc_22 += M1 - M2 + M3 + M6
 
-        M1 = tl.dot(A_13 + A_24, B_31 + B_42)
-        M2 = tl.dot(A_23 + A_24, B_31)
-        M3 = tl.dot(A_13, B_32 - B_42)
-        M4 = tl.dot(A_24, B_41 - B_31)
-        M5 = tl.dot(A_13 + A_14, B_42)
-        M6 = tl.dot(A_23 - A_13, B_31 + B_32)
-        M7 = tl.dot(A_14 - A_24, B_41 + B_42)
+        M1 = tl.dot(A_13_24_sum, B_31_42_sum)
+        M2 = tl.dot(A_23_24_sum, B_31)
+        M3 = tl.dot(A_13, B_32_42_sub)
+        M4 = tl.dot(A_24, B_41_31_sub)
+        M5 = tl.dot(A_13_14_sum, B_42)
+        M6 = tl.dot(A_23_13_sub, B_31_32_sum)
+        M7 = tl.dot(A_14_24_sub, B_41_42_sum)
 
         acc_11 += M1 + M4 - M5 + M7
         acc_12 += M3 + M5
@@ -162,26 +210,26 @@ def strassen_2_layer_fp32_accum(
 
         # C_12
         #####################################
-        M1 = tl.dot(A_31 + A_42, B_11 + B_22)
-        M2 = tl.dot(A_41 + A_42, B_11)
-        M3 = tl.dot(A_31, B_12 - B_22)
-        M4 = tl.dot(A_42, B_21 - B_11)
-        M5 = tl.dot(A_31 + A_32, B_22)
-        M6 = tl.dot(A_41 - A_31, B_11 + B_12)
-        M7 = tl.dot(A_32 - A_42, B_21 + B_22)
+        M1 = tl.dot(A_31_42_sum, B_11_22_sum)
+        M2 = tl.dot(A_41_42_sum, B_11)
+        M3 = tl.dot(A_31, B_12_22_sub)
+        M4 = tl.dot(A_42, B_21_11_sub)
+        M5 = tl.dot(A_31_32_sum, B_22)
+        M6 = tl.dot(A_41_31_sub, B_11_12_sum)
+        M7 = tl.dot(A_32_42_sub, B_21_22_sub)
 
         acc_31 += M1 + M4 - M5 + M7
         acc_32 += M3 + M5
         acc_41 += M2 + M4
         acc_42 += M1 - M2 + M3 + M6
         
-        M1 = tl.dot(A_33 + A_44, B_31 + B_42)
-        M2 = tl.dot(A_43 + A_44, B_31)
-        M3 = tl.dot(A_34, B_32 - B_42)
-        M4 = tl.dot(A_44, B_41 - B_31)
-        M5 = tl.dot(A_33 + A_34, B_42)
-        M6 = tl.dot(A_43 - A_33, B_31 + B_32)
-        M7 = tl.dot(A_34 - A_44, B_41 + B_42)
+        M1 = tl.dot(A_33_44_sum, B_31_42_sum)
+        M2 = tl.dot(A_43_44_sum, B_31)
+        M3 = tl.dot(A_34, B_32_42_sub)
+        M4 = tl.dot(A_44, B_41_31_sub)
+        M5 = tl.dot(A_33_34_sum, B_42)
+        M6 = tl.dot(A_43_33_sub, B_31_32_sum)
+        M7 = tl.dot(A_34_44_sub, B_41_42_sum)
 
         acc_31 += M1 + M4 - M5 + M7
         acc_32 += M3 + M5
@@ -190,26 +238,26 @@ def strassen_2_layer_fp32_accum(
 
         # C_21
         #####################################
-        M1 = tl.dot(A_11 + A_22, B_13 + B_24)
-        M2 = tl.dot(A_21 + A_22, B_13)
-        M3 = tl.dot(A_11, B_14 - B_24)
-        M4 = tl.dot(A_22, B_23 - B_13)
-        M5 = tl.dot(A_11 + A_12, B_24)
-        M6 = tl.dot(A_21 - A_11, B_13 + B_14)
-        M7 = tl.dot(A_12 - A_22, B_23 + B_24)
+        M1 = tl.dot(A_11_22_sum, B_13_24_sum)
+        M2 = tl.dot(A_21_22_sum, B_13)
+        M3 = tl.dot(A_11, B_14_24_sub)
+        M4 = tl.dot(A_22, B_23_13_sub)
+        M5 = tl.dot(A_11_12_sum, B_24)
+        M6 = tl.dot(A_21_11_sub, B_13_14_sum)
+        M7 = tl.dot(A_12_22_sub, B_23_24_sum)
 
         acc_13 += M1 + M4 - M5 + M7
         acc_14 += M3 + M5
         acc_23 += M2 + M4
         acc_24 += M1 - M2 + M3 + M6
         
-        M1 = tl.dot(A_13 + A_24, B_33 + B_44)
-        M2 = tl.dot(A_23 + A_24, B_33)
-        M3 = tl.dot(A_13, B_34 - B_44)
-        M4 = tl.dot(A_24, B_43 - B_33)
-        M5 = tl.dot(A_13 + A_14, B_44)
-        M6 = tl.dot(A_23 - A_13, B_33 + B_34)
-        M7 = tl.dot(A_14 - A_24, B_43 + B_44)
+        M1 = tl.dot(A_13_24_sum, B_33_44_sum)
+        M2 = tl.dot(A_23_24_sum, B_33)
+        M3 = tl.dot(A_13, B_34_44_sub)
+        M4 = tl.dot(A_24, B_43_33_sub)
+        M5 = tl.dot(A_13_14_sum, B_44)
+        M6 = tl.dot(A_23_13_sub, B_33_34_sum)
+        M7 = tl.dot(A_14_24_sub, B_43_44_sum)
 
         acc_13 += M1 + M4 - M5 + M7
         acc_14 += M3 + M5
@@ -218,26 +266,26 @@ def strassen_2_layer_fp32_accum(
 
         # C_22
         #####################################
-        M1 = tl.dot(A_31 + A_42, B_13 + B_24)
-        M2 = tl.dot(A_41 + A_42, B_13)
-        M3 = tl.dot(A_31, B_14 - B_24)
-        M4 = tl.dot(A_42, B_23 - B_13)
-        M5 = tl.dot(A_31 + A_32, B_24)
-        M6 = tl.dot(A_41 - A_31, B_13 + B_14)
-        M7 = tl.dot(A_32 - A_42, B_23 + B_24)
+        M1 = tl.dot(A_31_42_sum, B_13_24_sum)
+        M2 = tl.dot(A_41_42_sum, B_13)
+        M3 = tl.dot(A_31, B_14_24_sub)
+        M4 = tl.dot(A_42, B_23_13_sub)
+        M5 = tl.dot(A_31_32_sum, B_24)
+        M6 = tl.dot(A_41_31_sub, B_13_14_sum)
+        M7 = tl.dot(A_32_42_sub, B_23_24_sum)
 
         acc_33 += M1 + M4 - M5 + M7
         acc_34 += M3 + M5
         acc_43 += M2 + M4
         acc_44 += M1 - M2 + M3 + M6
         
-        M1 = tl.dot(A_33 + A_44, B_33 + B_44)
-        M2 = tl.dot(A_43 + A_44, B_33)
-        M3 = tl.dot(A_34, B_34 - B_44)
-        M4 = tl.dot(A_44, B_43 - B_33)
-        M5 = tl.dot(A_33 + A_34, B_44)
-        M6 = tl.dot(A_43 - A_33, B_33 + B_34)
-        M7 = tl.dot(A_34 - A_44, B_43 + B_44)
+        M1 = tl.dot(A_33_44_sum, B_33_44_sum)
+        M2 = tl.dot(A_43_44_sum, B_33)
+        M3 = tl.dot(A_34, B_34_44_sub)
+        M4 = tl.dot(A_44, B_43_33_sub)
+        M5 = tl.dot(A_33_34_sum, B_44)
+        M6 = tl.dot(A_43_33_sub, B_33_34_sum)
+        M7 = tl.dot(A_34_44_sub, B_43_44_sum)
 
         acc_33 += M1 + M4 - M5 + M7
         acc_34 += M3 + M5
@@ -264,7 +312,7 @@ def strassen_2_layer_fp32_accum(
     c_ptrs_43 = C_ptr + row_offs4[:, None] * A_stride_m + col_offs3[None, :] * A_stride_k
     c_ptrs_44 = C_ptr + row_offs4[:, None] * A_stride_m + col_offs4[None, :] * A_stride_k
 
-    # Load C blocks
+    # load C blocks
     C_11 = tl.load(c_ptrs_11, mask=(row_offs1[:, None] < M) & (col_offs1[None, :] < N), other=0.)
     C_12 = tl.load(c_ptrs_12, mask=(row_offs1[:, None] < M) & (col_offs2[None, :] < N), other=0.)
     C_13 = tl.load(c_ptrs_13, mask=(row_offs1[:, None] < M) & (col_offs3[None, :] < N), other=0.)
@@ -304,6 +352,7 @@ def strassen_2_layer_fp32_accum(
     tl.store(c_ptrs_42, acc_42 + C_42, mask=(row_offs4[:, None] < M) & (col_offs2[None, :] < N))
     tl.store(c_ptrs_43, acc_43 + C_43, mask=(row_offs4[:, None] < M) & (col_offs3[None, :] < N))
     tl.store(c_ptrs_44, acc_44 + C_44, mask=(row_offs4[:, None] < M) & (col_offs4[None, :] < N))
+
 
 @triton.jit
 def strassen_kernel_fp32_accum(
@@ -424,7 +473,7 @@ def run_strassen_2_layer_fp32_accum(A, B, C, BLOCK_SIZE=64):
     assert K == B.shape[0] and A.shape[0] == M and B.shape[1] == N
     
     grid = (M // BLOCK_SIZE, N // BLOCK_SIZE)
-    matmul_kernel_fp32_accum[grid](A, B, C, M, N, K,
+    strassen_2_layer_fp32_accum[grid](A, B, C, M, N, K,
                                   A.stride(0), A.stride(1),
                                   BLOCK_SIZE, BLOCK_SIZE // 4)
 
@@ -448,6 +497,27 @@ def run_matmul_fp32_accum(A, B, C, BLOCK_SIZE=64):
                                    A.stride(0), A.stride(1),
                                    B.stride(0), B.stride(1),
                                    BLOCK_SIZE)
+
+def strassens_2_layer_test() -> None:
+    torch.manual_seed(3331)
+
+    a = torch.randn((512, 512)).cuda()
+    b = torch.randn((512, 512)).cuda()
+    c = torch.zeros_like(a).cuda()
+
+    gt_mm = a @ b
+
+    print("gt mat mul")
+    print(gt_mm)
+    print("strassen's mat mul")
+    run_strassen_2_layer_fp32_accum(a, b, c)
+    print("A matrix")
+    print(a)
+    print("B matrix")
+    print(b)
+    print("C matrix")
+    print(c)
+    assert torch.allclose(gt_mm, c, atol=1e-6), "did not match gt"
 
 def strassens_test() -> None:
     torch.manual_seed(3331)
