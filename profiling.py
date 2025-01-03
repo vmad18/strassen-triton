@@ -12,7 +12,6 @@ def benchmark_matmul(
         num_runs: int = 100,
         device: str = "cuda"
 ) -> dict:
-    # torch.manual_seed(3331)
 
     a = torch.randn((M, K), device=device, dtype=torch.float32)
     b = torch.randn((K, N), device=device, dtype=torch.float32)
@@ -31,55 +30,63 @@ def benchmark_matmul(
 
     torch.cuda.synchronize()
 
-    triton_strassen2_times = []
-    for _ in range(num_runs):
-        c.zero_()
-        start = time.perf_counter()
-        run_strassen_2_layer_fp32_accum(a, b, c)
-        
-        torch.cuda.synchronize()
-        end = time.perf_counter()
-        triton_strassen2_times.append(end - start)
+    start_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
+    end_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
 
-        torch.cuda.empty_cache()
+    for i in range(num_runs):
+        c.zero_()
+        torch.cuda._sleep(1_000_000)
+        start_events[i].record()
+        run_strassen_2_layer_fp32_accum(a, b, c, 64)
+        end_events[i].record()
+
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    triton_strassen2_times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
 
     max_diff = torch.max(torch.abs(c - gt_mm)).item()
 
-    triton_strassen_times = []
-    for _ in range(num_runs):
+    start_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
+    end_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
+
+    for i in range(num_runs):
         c.zero_()
-        start = time.perf_counter()
+        torch.cuda._sleep(1_000_000)
+        start_events[i].record()
         run_strassen_fp32_accum(a, b, c)
+        end_events[i].record()
 
-        torch.cuda.synchronize()        
-        end = time.perf_counter()
-        triton_strassen_times.append(end - start)
+    torch.cuda.synchronize()        
+    torch.cuda.empty_cache()
+    triton_strassen_times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
 
-        torch.cuda.empty_cache()
+
+    start_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
+    end_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
 
     triton_mm_times = []
-    for _ in range(num_runs):
+    for i in range(num_runs):
         c.zero_()
-        start = time.perf_counter()
+        torch.cuda._sleep(1_000_000)
+        start_events[i].record()
         run_matmul_fp32_accum(a, b, c)
-        
-        torch.cuda.synchronize()
-        end = time.perf_counter()
-        triton_mm_times.append(end - start)
+        end_events[i].record()
 
-        torch.cuda.empty_cache()
+    torch.cuda.synchronize()        
+    torch.cuda.empty_cache()
+    triton_mm_times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
 
     torch_times = []
-    for _ in range(num_runs):
-        start = time.perf_counter()
+    for i in range(num_runs):
+        c.zero_()
+        torch.cuda._sleep(1_000_000)
+        start_events[i].record()
         torch.matmul(a, b)
-        
-        torch.cuda.synchronize()
-        end = time.perf_counter()
-        torch_times.append(end - start)
-        
-        torch.cuda.empty_cache()
+        end_events[i].record()
 
+    torch.cuda.synchronize()        
+    torch.cuda.empty_cache()
+    torch_times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
 
     triton_strassen2_avg = sum(triton_strassen2_times) / len(triton_strassen2_times)
     triton_strassen_avg = sum(triton_strassen_times) / len(triton_strassen_times)
@@ -100,10 +107,10 @@ def benchmark_matmul(
         "triton_strassen_min_ms": triton_strassen_min * 1000,
         "triton_mm_min_ms": triton_mm_min * 1000,
         "torch_min_ms": torch_min * 1000,
-        "triton_strassen2_tflops": (2 * M * N * K) / (triton_strassen2_min * 1e12),
-        "triton_strassen_tflops": (2 * M * N * K) / (triton_strassen_min * 1e12),
-        "triton_mm_tflops": (2 * M * N * K) / (triton_mm_min * 1e12),
-        "torch_tflops": (2 * M * N * K) / (torch_min * 1e12),
+        "triton_strassen2_tflops": (2 * M * N * K) / (triton_strassen2_min * 1e12 + 1e-6),
+        "triton_strassen_tflops": (2 * M * N * K) / (triton_strassen_min * 1e12 + 1e-6),
+        "triton_mm_tflops": (2 * M * N * K) / (triton_mm_min * 1e12 + 1e-6),
+        "torch_tflops": (2 * M * N * K) / (torch_min * 1e12 + 1e-6),
         "strassen2_max_diff": max_diff,
         "strassen2_mean_speedup": torch_avg / triton_strassen2_avg,
         "strassen_mean_speedup": torch_avg / triton_strassen_avg,

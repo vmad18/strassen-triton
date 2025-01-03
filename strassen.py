@@ -2,13 +2,28 @@ import triton
 import triton.language as tl
 import torch
 
+@triton.autotune(
+    configs=[
+        triton.Config({'BLOCK_SIZE': 64, 'QUARTER_BLOCK': 16}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 128, 'QUARTER_BLOCK': 32}, num_warps=2),
+        # triton.Config({'BLOCK_SIZE': 256, 'QUARTER_BLOCK': 64}, num_warps=2),
+        # triton.Config({'BLOCK_SIZE': 64, 'QUARTER_BLOCK': 16}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 128, 'QUARTER_BLOCK': 32}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 256, 'QUARTER_BLOCK': 64}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 64, 'QUARTER_BLOCK': 16}, num_warps=8),
+        # triton.Config({'BLOCK_SIZE': 128, 'QUARTER_BLOCK': 32}, num_warps=8),
+        # triton.Config({'BLOCK_SIZE': 256, 'QUARTER_BLOCK': 64}, num_warps=8),
+    ],
+    key=['M', 'N', 'K'],
+    reset_to_zero=['C_ptr']
+)
 @triton.jit
 def strassen_2_layer_fp32_accum(
         A_ptr, B_ptr, C_ptr,
         M, N, K,
         A_stride_m, A_stride_k,
-        BLOCK_SIZE: tl.constexpr,
-        QUARTER_BLOCK: tl.constexpr):
+        QUARTER_BLOCK: tl.constexpr,
+        BLOCK_SIZE: tl.constexpr):
     
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)
@@ -132,161 +147,101 @@ def strassen_2_layer_fp32_accum(
         B_42 = tl.load(b_ptrs_42, mask=(k_offs4[:, None] < K) & (col_offs2[None, :] < N), other=0.)
         B_43 = tl.load(b_ptrs_43, mask=(k_offs4[:, None] < K) & (col_offs3[None, :] < N), other=0.)
         B_44 = tl.load(b_ptrs_44, mask=(k_offs4[:, None] < K) & (col_offs4[None, :] < N), other=0.)
-
-        A_11_22_sum = A_11 + A_22
-        B_11_22_sum = B_11 + B_22
-        A_21_22_sum = A_21 + A_22
-        B_12_22_sub = B_12 - B_22
-        B_21_11_sub = B_21 - B_11
-        A_11_12_sum = A_11 + A_12
-        A_21_11_sub = A_21 - A_11
-        B_11_12_sum = B_11 + B_12
-        A_12_22_sub = A_12 - A_22
-        B_21_22_sub, = B_21 + B_22
-
-        A_13_24_sum = A_13 + A_24
-        B_31_42_sum = B_31 + B_42
-        A_23_24_sum = A_23 + A_24
-        B_32_42_sub = B_32 - B_42
-        B_41_31_sub = B_41 - B_31
-        A_13_14_sum = A_13 + A_14
-        A_23_13_sub = A_23 - A_13
-        B_31_32_sum = B_31 + B_32
-        A_14_24_sub = A_14 - A_24
-        B_41_42_sum = B_41 + B_42
-
-        A_31_42_sum = A_31 + A_42
-        A_41_42_sum = A_41 + A_42
-        A_31_32_sum = A_31 + A_32
-        A_41_31_sub = A_41 - A_31
-        A_32_42_sub = A_32 - A_42
-
-        A_33_44_sum = A_33 + A_44
-        A_43_44_sum = A_43 + A_44
-        A_33_34_sum = A_33 + A_34
-        A_43_33_sub = A_43 - A_33
-        A_34_44_sub = A_34 - A_44
-
-        B_13_24_sum = B_13 + B_24
-        B_14_24_sub = B_14 - B_24
-        B_23_13_sub = B_23 - B_13
-        B_13_14_sum = B_13 + B_14
-        B_23_24_sum = B_23 + B_24
-
-        B_33_44_sum = B_33 + B_44
-        B_43_44_sum = B_43 + B_44
-        B_34_44_sub = B_34 - B_44
-        B_43_33_sub = B_43 - B_33
-        B_33_34_sum = B_33 + B_34
-        
-        # C_11
+        #C_11
         #####################################
-    
-        M1 = tl.dot(A_11_22_sum, B_11_22_sum)
-        M2 = tl.dot(A_21_22_sum, B_11)
-        M3 = tl.dot(A_11, B_12_22_sub)
-        M4 = tl.dot(A_22, B_21_11_sub)
-        M5 = tl.dot(A_11_12_sum, B_22)
-        M6 = tl.dot(A_21_11_sub, B_11_12_sum)
-        M7 = tl.dot(A_12_22_sub, B_21_22_sub)
-
+        M1 = tl.dot(A_11 + A_22, B_11 + B_22)
+        M2 = tl.dot(A_21 + A_22, B_11)
+        M3 = tl.dot(A_11, B_12 - B_22)
+        M4 = tl.dot(A_22, B_21 - B_11)
+        M5 = tl.dot(A_11 + A_12, B_22)
+        M6 = tl.dot(A_21 - A_11, B_11 + B_12)
+        M7 = tl.dot(A_12 - A_22, B_21 + B_22)
         acc_11 += M1 + M4 - M5 + M7
         acc_12 += M3 + M5
         acc_21 += M2 + M4
         acc_22 += M1 - M2 + M3 + M6
-
-        M1 = tl.dot(A_13_24_sum, B_31_42_sum)
-        M2 = tl.dot(A_23_24_sum, B_31)
-        M3 = tl.dot(A_13, B_32_42_sub)
-        M4 = tl.dot(A_24, B_41_31_sub)
-        M5 = tl.dot(A_13_14_sum, B_42)
-        M6 = tl.dot(A_23_13_sub, B_31_32_sum)
-        M7 = tl.dot(A_14_24_sub, B_41_42_sum)
-
+        M1 = tl.dot(A_13 + A_24, B_31 + B_42)
+        M2 = tl.dot(A_23 + A_24, B_31)
+        M3 = tl.dot(A_13, B_32 - B_42)
+        M4 = tl.dot(A_24, B_41 - B_31)
+        M5 = tl.dot(A_13 + A_14, B_42)
+        M6 = tl.dot(A_23 - A_13, B_31 + B_32)
+        M7 = tl.dot(A_14 - A_24, B_41 + B_42)
         acc_11 += M1 + M4 - M5 + M7
         acc_12 += M3 + M5
         acc_21 += M2 + M4
         acc_22 += M1 - M2 + M3 + M6
-
         # C_12
         #####################################
-        M1 = tl.dot(A_31_42_sum, B_11_22_sum)
-        M2 = tl.dot(A_41_42_sum, B_11)
-        M3 = tl.dot(A_31, B_12_22_sub)
-        M4 = tl.dot(A_42, B_21_11_sub)
-        M5 = tl.dot(A_31_32_sum, B_22)
-        M6 = tl.dot(A_41_31_sub, B_11_12_sum)
-        M7 = tl.dot(A_32_42_sub, B_21_22_sub)
-
+        M1 = tl.dot(A_31 + A_42, B_11 + B_22)
+        M2 = tl.dot(A_41 + A_42, B_11)
+        M3 = tl.dot(A_31, B_12 - B_22)
+        M4 = tl.dot(A_42, B_21 - B_11)
+        M5 = tl.dot(A_31 + A_32, B_22)
+        M6 = tl.dot(A_41 - A_31, B_11 + B_12)
+        M7 = tl.dot(A_32 - A_42, B_21 + B_22)
         acc_31 += M1 + M4 - M5 + M7
         acc_32 += M3 + M5
         acc_41 += M2 + M4
         acc_42 += M1 - M2 + M3 + M6
         
-        M1 = tl.dot(A_33_44_sum, B_31_42_sum)
-        M2 = tl.dot(A_43_44_sum, B_31)
-        M3 = tl.dot(A_34, B_32_42_sub)
-        M4 = tl.dot(A_44, B_41_31_sub)
-        M5 = tl.dot(A_33_34_sum, B_42)
-        M6 = tl.dot(A_43_33_sub, B_31_32_sum)
-        M7 = tl.dot(A_34_44_sub, B_41_42_sum)
-
+        M1 = tl.dot(A_33 + A_44, B_31 + B_42)
+        M2 = tl.dot(A_43 + A_44, B_31)
+        M3 = tl.dot(A_34, B_32 - B_42)
+        M4 = tl.dot(A_44, B_41 - B_31)
+        M5 = tl.dot(A_33 + A_34, B_42)
+        M6 = tl.dot(A_43 - A_33, B_31 + B_32)
+        M7 = tl.dot(A_34 - A_44, B_41 + B_42)
         acc_31 += M1 + M4 - M5 + M7
         acc_32 += M3 + M5
         acc_41 += M2 + M4
         acc_42 += M1 - M2 + M3 + M6
-
         # C_21
         #####################################
-        M1 = tl.dot(A_11_22_sum, B_13_24_sum)
-        M2 = tl.dot(A_21_22_sum, B_13)
-        M3 = tl.dot(A_11, B_14_24_sub)
-        M4 = tl.dot(A_22, B_23_13_sub)
-        M5 = tl.dot(A_11_12_sum, B_24)
-        M6 = tl.dot(A_21_11_sub, B_13_14_sum)
-        M7 = tl.dot(A_12_22_sub, B_23_24_sum)
-
+        M1 = tl.dot(A_11 + A_22, B_13 + B_24)
+        M2 = tl.dot(A_21 + A_22, B_13)
+        M3 = tl.dot(A_11, B_14 - B_24)
+        M4 = tl.dot(A_22, B_23 - B_13)
+        M5 = tl.dot(A_11 + A_12, B_24)
+        M6 = tl.dot(A_21 - A_11, B_13 + B_14)
+        M7 = tl.dot(A_12 - A_22, B_23 + B_24)
         acc_13 += M1 + M4 - M5 + M7
         acc_14 += M3 + M5
         acc_23 += M2 + M4
         acc_24 += M1 - M2 + M3 + M6
         
-        M1 = tl.dot(A_13_24_sum, B_33_44_sum)
-        M2 = tl.dot(A_23_24_sum, B_33)
-        M3 = tl.dot(A_13, B_34_44_sub)
-        M4 = tl.dot(A_24, B_43_33_sub)
-        M5 = tl.dot(A_13_14_sum, B_44)
-        M6 = tl.dot(A_23_13_sub, B_33_34_sum)
-        M7 = tl.dot(A_14_24_sub, B_43_44_sum)
-
+        M1 = tl.dot(A_13 + A_24, B_33 + B_44)
+        M2 = tl.dot(A_23 + A_24, B_33)
+        M3 = tl.dot(A_13, B_34 - B_44)
+        M4 = tl.dot(A_24, B_43 - B_33)
+        M5 = tl.dot(A_13 + A_14, B_44)
+        M6 = tl.dot(A_23 - A_13, B_33 + B_34)
+        M7 = tl.dot(A_14 - A_24, B_43 + B_44)
         acc_13 += M1 + M4 - M5 + M7
         acc_14 += M3 + M5
         acc_23 += M2 + M4
         acc_24 += M1 - M2 + M3 + M6
-
         # C_22
         #####################################
-        M1 = tl.dot(A_31_42_sum, B_13_24_sum)
-        M2 = tl.dot(A_41_42_sum, B_13)
-        M3 = tl.dot(A_31, B_14_24_sub)
-        M4 = tl.dot(A_42, B_23_13_sub)
-        M5 = tl.dot(A_31_32_sum, B_24)
-        M6 = tl.dot(A_41_31_sub, B_13_14_sum)
-        M7 = tl.dot(A_32_42_sub, B_23_24_sum)
-
+        M1 = tl.dot(A_31 + A_42, B_13 + B_24)
+        M2 = tl.dot(A_41 + A_42, B_13)
+        M3 = tl.dot(A_31, B_14 - B_24)
+        M4 = tl.dot(A_42, B_23 - B_13)
+        M5 = tl.dot(A_31 + A_32, B_24)
+        M6 = tl.dot(A_41 - A_31, B_13 + B_14)
+        M7 = tl.dot(A_32 - A_42, B_23 + B_24)
         acc_33 += M1 + M4 - M5 + M7
         acc_34 += M3 + M5
         acc_43 += M2 + M4
         acc_44 += M1 - M2 + M3 + M6
         
-        M1 = tl.dot(A_33_44_sum, B_33_44_sum)
-        M2 = tl.dot(A_43_44_sum, B_33)
-        M3 = tl.dot(A_34, B_34_44_sub)
-        M4 = tl.dot(A_44, B_43_33_sub)
-        M5 = tl.dot(A_33_34_sum, B_44)
-        M6 = tl.dot(A_43_33_sub, B_33_34_sum)
-        M7 = tl.dot(A_34_44_sub, B_43_44_sum)
-
+        M1 = tl.dot(A_33 + A_44, B_33 + B_44)
+        M2 = tl.dot(A_43 + A_44, B_33)
+        M3 = tl.dot(A_33, B_34 - B_44)
+        M4 = tl.dot(A_44, B_43 - B_33)
+        M5 = tl.dot(A_33 + A_34, B_44)
+        M6 = tl.dot(A_43 - A_33, B_33 + B_34)
+        M7 = tl.dot(A_34 - A_44, B_43 + B_44)
         acc_33 += M1 + M4 - M5 + M7
         acc_34 += M3 + M5
         acc_43 += M2 + M4
@@ -472,10 +427,9 @@ def run_strassen_2_layer_fp32_accum(A, B, C, BLOCK_SIZE=64):
     K = A.shape[1]
     assert K == B.shape[0] and A.shape[0] == M and B.shape[1] == N
     
-    grid = (M // BLOCK_SIZE, N // BLOCK_SIZE)
+    grid = lambda meta: (triton.cdiv(M, meta['BLOCK_SIZE']), triton.cdiv(N, meta['BLOCK_SIZE']), )
     strassen_2_layer_fp32_accum[grid](A, B, C, M, N, K,
-                                  A.stride(0), A.stride(1),
-                                  BLOCK_SIZE, BLOCK_SIZE // 4)
+                                  A.stride(0), A.stride(1))
 
 def run_strassen_fp32_accum(A, B, C, BLOCK_SIZE=64):
     M, N = C.shape
