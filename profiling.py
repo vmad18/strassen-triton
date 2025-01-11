@@ -1,8 +1,43 @@
 import sys
 
 import torch
+import torch.distributed as dist
 import time
 from strassen import run_strassen_2_layer_fp32_accum, run_strassen_fp32_accum, run_matmul_fp32_accum
+
+class DataDistributed:
+    def __init__(self, world_size=4):
+        self.world_size = world_size
+        # Initialize process group
+        if not dist.is_initialized():
+            dist.init_process_group('nccl')
+        
+        self.rank = dist.get_rank()
+        
+    def __call__(self, a: torch.Tensor, b: torch.Tensor, func, three: bool = True) -> torch.Tensor:
+        assert len(a.shape) == len(b.shape) == 2, "Inputs must be 2D matrices"
+        M, K = a.shape
+        K_, N = b.shape
+        assert K == K_, "inner dims must match"
+        
+        local_M = M // self.world_size
+        start_idx = self.rank * local_M
+        end_idx = start_idx + local_M
+        local_a = a[start_idx:end_idx].cuda()
+        local_b = b.cuda()
+        
+        local_c = torch.empty((local_M, N), dtype=torch.float16, device='cuda')
+        
+        if three:
+            func(local_a, local_b, local_c)
+        else:
+            local_c = func(local_a, local_b)
+
+        gathered_c = [torch.empty_like(local_c) for _ in range(self.world_size)]
+        dist.all_gather(gathered_c, local_c)
+        
+        final_c = torch.cat(gathered_c, dim=0)
+        return final_c
 
 def benchmark_matmul(
         M: int,
@@ -18,26 +53,25 @@ def benchmark_matmul(
     c = torch.zeros((M, N), device=device, dtype=torch.float32)
 
     gt_mm = torch.matmul(a, b)
+    dd = DataDistributed()
 
     for _ in range(num_warmup):
-        c.zero_()
-        run_strassen_2_layer_fp32_accum(a, b, c)
-        c.zero_()
-        run_strassen_fp32_accum(a, b, c)
-        c.zero_()
-        run_matmul_fp32_accum(a, b, c)
-        torch.matmul(a, b)
+        dd(a, b, run_strassen_2_layer_fp32_accum)
+        dd(a, b, run_strassen_fp32_accum)
+        dd(a, b, run_matmul_fp32_accum)
+        dd(a, b, torch.matmul, False)
 
     torch.cuda.synchronize()
 
     start_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
     end_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
 
+
     for i in range(num_runs):
-        c.zero_()
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
-        run_strassen_2_layer_fp32_accum(a, b, c, 64)
+        dd(a, b, run_strassen_2_layer_fp32_accum)
+        # run_strassen_2_layer_fp32_accum(a, b, c, 64)
         end_events[i].record()
 
     torch.cuda.synchronize()
@@ -46,6 +80,7 @@ def benchmark_matmul(
 
     max_diff = torch.max(torch.abs(c - gt_mm)).item()
 
+
     start_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
     end_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
 
@@ -53,7 +88,8 @@ def benchmark_matmul(
         c.zero_()
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
-        run_strassen_fp32_accum(a, b, c)
+        dd(a, b, run_strassen_fp32_accum)
+        # run_strassen_fp32_accum(a, b, c)
         end_events[i].record()
 
     torch.cuda.synchronize()        
@@ -69,7 +105,8 @@ def benchmark_matmul(
         c.zero_()
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
-        run_matmul_fp32_accum(a, b, c)
+        dd(a, b, run_matmul_fp32_accum)
+        # run_matmul_fp32_accum(a, b, c)
         end_events[i].record()
 
     torch.cuda.synchronize()        
@@ -81,7 +118,8 @@ def benchmark_matmul(
         c.zero_()
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
-        torch.matmul(a, b)
+        dd(a, b, torch.matmul)
+        # torch.matmul(a, b)
         end_events[i].record()
 
     torch.cuda.synchronize()        
