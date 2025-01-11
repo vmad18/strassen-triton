@@ -1,9 +1,28 @@
 import sys
+import os
 
 import torch
 import torch.distributed as dist
 import time
 from strassen import run_strassen_2_layer_fp32_accum, run_strassen_fp32_accum, run_matmul_fp32_accum
+
+def init_distributed():
+    """Initialize distributed environment"""
+    if 'RANK' not in os.environ:
+        os.environ['RANK'] = '0'
+    if 'WORLD_SIZE' not in os.environ:
+        os.environ['WORLD_SIZE'] = '4'
+    if 'MASTER_ADDR' not in os.environ:
+        os.environ['MASTER_ADDR'] = 'localhost'
+    if 'MASTER_PORT' not in os.environ:
+        os.environ['MASTER_PORT'] = '29500'
+
+    dist.init_process_group(
+        backend='nccl',
+        init_method='env://',
+        world_size=int(os.environ['WORLD_SIZE']),
+        rank=int(os.environ['RANK'])
+    )
 
 class DataDistributed:
     def __init__(self, world_size=4):
