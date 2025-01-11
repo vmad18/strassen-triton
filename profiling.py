@@ -160,7 +160,7 @@ def benchmark_matmul(
 
 def profile_mats():
 
-    sizes = [16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
+    sizes = [8192, 16384, 32768, 65536]
 
     print(f"{'Size':>6}| {'Strassen2':>10} | {'Strassen':>10} | {'Triton_MM':>10} | {'PyTorch':>10} | {'Strassen2_Speedup':>8} | {'Strassen_Speedup':>8} | {'Triton Speedup':>8} | {'Max Diff':>8} | {'TF/s':>6}")
     print("-" * 100)
