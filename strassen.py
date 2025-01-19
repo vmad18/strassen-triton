@@ -2,23 +2,18 @@ import triton
 import triton.language as tl
 import torch
 
-# @triton.autotune(
-#     configs=[
-#         # triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
-#         # triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
-#         triton.Config({'BLOCK_SIZE': 64, 'QUARTER_BLOCK': 16}, num_warps=4),
-#         triton.Config({'BLOCK_SIZE': 64, 'QUARTER_BLOCK': 16}, num_warps=8),
-#         triton.Config({'BLOCK_SIZE': 128, 'QUARTER_BLOCK': 32}, num_warps=4),
-#         triton.Config({'BLOCK_SIZE': 128, 'QUARTER_BLOCK': 32}, num_warps=8),
-#         triton.Config({'BLOCK_SIZE': 128, 'QUARTER_BLOCK': 32}, num_warps=16),
-#         triton.Config({'BLOCK_SIZE': 256, 'QUARTER_BLOCK': 32}, num_warps=8),
-#         # triton.Config({'BLOCK_SIZE': 256}, num_warps=16),
-#         # triton.Config({'BLOCK_SIZE': 256}, num_warps=32),
-#         # triton.Config({'BLOCK_SIZE': 512}, num_warps=16),
-#         # triton.Config({'BLOCK_SIZE': 512}, num_warps=32),
-#     ],
-#     key=['M', 'N', 'K'],
-# )
+@triton.autotune(
+    configs=[
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
+        triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
+    ],
+    key=['M', 'N', 'K'],
+)
 @triton.jit
 def strassen_2_layer_fp32_accum(
         A_ptr, B_ptr, C_ptr,
@@ -524,7 +519,8 @@ def run_strassen_2_layer_fp32_accum(A, B, C, BLOCK_SIZE=64):
     
     grid = lambda meta: (triton.cdiv(M, meta["BLOCK_SIZE"]), triton.cdiv(N, meta["BLOCK_SIZE"]), )
     strassen_2_layer_fp32_accum[grid](A, B, C, M, N, K,
-                                  A.stride(0), A.stride(1), BLOCK_SIZE, num_warps=4)
+                                  A.stride(0), A.stride(1))
+    # print(krnl.metadata)
 
 def run_strassen_fp32_accum(A, B, C, BLOCK_SIZE=64):
     M, N = C.shape
@@ -548,23 +544,20 @@ def run_matmul_fp32_accum(A, B, C, BLOCK_SIZE=64):
                                    BLOCK_SIZE)
 
 
-# @triton.autotune(
-#     configs=[
-#         # triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
-#         # triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
-#         triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
-#         triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
-#         triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
-#         triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
-#         triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
-#         # triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
-#         # triton.Config({'BLOCK_SIZE': 256}, num_warps=16),
-#         # triton.Config({'BLOCK_SIZE': 256}, num_warps=32),
-#         # triton.Config({'BLOCK_SIZE': 512}, num_warps=16),
-#         # triton.Config({'BLOCK_SIZE': 512}, num_warps=32),
-#     ],
-#     key=['M', 'N', 'K'],
-# )
+@triton.autotune(
+    configs=[
+        # triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
+        # triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
+        triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
+    ],
+    key=['M', 'N', 'K'],
+)
 @triton.jit
 def winograd_strassen_kernel_fp32_accum(
         A_ptr, B_ptr, C_ptr,
@@ -665,7 +658,7 @@ def run_winograd_strassen(A, B, C, BLOCK_SIZE = 64):
     grid = lambda meta: (triton.cdiv(M, meta['BLOCK_SIZE']),
                          triton.cdiv(N, meta['BLOCK_SIZE']))
     winograd_strassen_kernel_fp32_accum[grid](A, B, C, M, N, K,
-                                              A.stride(0), A.stride(1), BLOCK_SIZE)
+                                              A.stride(0), A.stride(1))
 
 
 
