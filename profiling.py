@@ -1,35 +1,15 @@
 import sys
 import os
-
 import torch
 import torch.distributed as dist
 import time
-from strassen import run_strassen_2_layer_fp32_accum, run_strassen_fp32_accum, run_matmul_fp32_accum
-
-def init_distributed():
-    """Initialize distributed environment"""
-    if 'RANK' not in os.environ:
-        os.environ['RANK'] = '0'
-    if 'WORLD_SIZE' not in os.environ:
-        os.environ['WORLD_SIZE'] = '4'
-    if 'MASTER_ADDR' not in os.environ:
-        os.environ['MASTER_ADDR'] = 'localhost'
-    if 'MASTER_PORT' not in os.environ:
-        os.environ['MASTER_PORT'] = '29500'
-
-    dist.init_process_group(
-        backend='nccl',
-        init_method='env://',
-        world_size=int(os.environ['WORLD_SIZE']),
-        rank=int(os.environ['RANK'])
-    )
+from strassen import run_strassen_2_layer_fp32_accum, run_matmul_fp32_accum, run_winograd_strassen
 
 class DataDistributed:
     def __call__(self, a: torch.Tensor, b: torch.Tensor, func, three: bool = False) -> torch.Tensor:
         # Move tensors to GPU
         a = a.cuda()
         b = b.cuda()
-        
         if three:
             c = torch.empty((*a.shape[:-1], b.shape[-1]), dtype=torch.float16, device='cuda')
             func(a, b, c)
@@ -46,7 +26,6 @@ def benchmark_matmul(
         num_runs: int = 100,
         device: str = "cuda"
 ) -> dict:
-
     a = torch.randn((M, K), device=device, dtype=torch.float32)
     b = torch.randn((K, N), device=device, dtype=torch.float32)
     c = torch.zeros((M, N), device=device, dtype=torch.float32)
@@ -56,7 +35,7 @@ def benchmark_matmul(
 
     for _ in range(num_warmup):
         dd(a, b, run_strassen_2_layer_fp32_accum, three=True)
-        dd(a, b, run_strassen_fp32_accum, three=True)
+        dd(a, b, run_winograd_strassen, three=True)
         dd(a, b, run_matmul_fp32_accum, three=True)
         dd(a, b, torch.matmul, three=False)  # Explicitly set three=False for torch.matmul
 
@@ -64,7 +43,6 @@ def benchmark_matmul(
 
     start_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
     end_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
-
 
     for i in range(num_runs):
         torch.cuda._sleep(1_000_000)
@@ -79,7 +57,6 @@ def benchmark_matmul(
 
     max_diff = torch.max(torch.abs(c - gt_mm)).item()
 
-
     start_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
     end_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
 
@@ -87,19 +64,17 @@ def benchmark_matmul(
         c.zero_()
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
-        dd(a, b, run_strassen_fp32_accum, three=True)
+        dd(a, b, run_winograd_strassen, three=True)
         # run_strassen_fp32_accum(a, b, c)
         end_events[i].record()
 
-    torch.cuda.synchronize()        
+    torch.cuda.synchronize()
     torch.cuda.empty_cache()
     triton_strassen_times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
-
 
     start_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
     end_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_runs)]
 
-    triton_mm_times = []
     for i in range(num_runs):
         c.zero_()
         torch.cuda._sleep(1_000_000)
@@ -108,11 +83,10 @@ def benchmark_matmul(
         # run_matmul_fp32_accum(a, b, c)
         end_events[i].record()
 
-    torch.cuda.synchronize()        
+    torch.cuda.synchronize()
     torch.cuda.empty_cache()
     triton_mm_times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
 
-    torch_times = []
     for i in range(num_runs):
         c.zero_()
         torch.cuda._sleep(1_000_000)
@@ -121,7 +95,7 @@ def benchmark_matmul(
         # torch.matmul(a, b)
         end_events[i].record()
 
-    torch.cuda.synchronize()        
+    torch.cuda.synchronize()
     torch.cuda.empty_cache()
     torch_times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
 
@@ -158,10 +132,10 @@ def benchmark_matmul(
 
 
 def profile_mats():
+    sizes = [4096, 8192, 16384, 32768, 65536]
 
-    sizes = [8192, 16384, 32768, 65536]
-
-    print(f"{'Size':>6}| {'Strassen2':>10} | {'Strassen':>10} | {'Triton_MM':>10} | {'PyTorch':>10} | {'Strassen2_Speedup':>8} | {'Strassen_Speedup':>8} | {'Triton Speedup':>8} | {'Max Diff':>8} | {'TF/s':>6}")
+    print(
+        f"{'Size':>6}| {'Strassen2':>10} | {'Strassen':>10} | {'Triton_MM':>10} | {'PyTorch':>10} | {'Strassen2_Speedup':>8} | {'Strassen_Speedup':>8} | {'Triton Speedup':>8} | {'Max Diff':>8} | {'TF/s':>6}")
     print("-" * 100)
 
     for size in sizes:
@@ -180,7 +154,7 @@ def profile_mats():
               f"{results['strassen_mean_speedup']:>8.3f}x | "
               f"{results['triton_mm_mean_speedup']:>8.3f}x | "
               f"{results['strassen2_max_diff']:>10.3e} | "
-              f"{results['triton_strassen2_tflops']:>8.3f} ") # f"{results['triton_mm_tflops']:>8.3f} "
+              f"{results['triton_strassen2_tflops']:>8.3f} ")  # f"{results['triton_mm_tflops']:>8.3f} "
 
 
 if __name__ == "__main__":
