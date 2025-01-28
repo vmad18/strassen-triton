@@ -2,18 +2,18 @@ import triton
 import triton.language as tl
 import torch
 
-@triton.autotune(
-    configs=[
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
-        triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
-    ],
-    key=['M', 'N', 'K'],
-)
+# @triton.autotune(
+#     configs=[
+#         triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
+#         triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+#         triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
+#         triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
+#         triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
+#         triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
+#         triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
+#     ],
+#     key=['M', 'N', 'K'],
+# )
 @triton.jit
 def strassen_2_layer_fp32_accum(
         A_ptr, B_ptr, C_ptr,
@@ -404,8 +404,8 @@ def strassen_kernel_fp32_accum(
         A_ptr, B_ptr, C_ptr,
         M, N, K,
         A_stride_m, A_stride_k,
-        BLOCK_SIZE: tl.constexpr,
-        HALF_BLOCK: tl.constexpr):
+        BLOCK_SIZE: tl.constexpr):
+    HALF_BLOCK: tl.constexpr = BLOCK_SIZE // 2
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)
 
@@ -513,14 +513,24 @@ def matmul_kernel_fp32_accum(
     tl.store(c_ptrs, acc + c_current, mask=c_mask)
 
 def run_strassen_2_layer_fp32_accum(A, B, C, BLOCK_SIZE=64):
-    M, N = C.shape
-    K = A.shape[1]
+    if len(A.shape) == 3:  # Batched
+        batch_size, M, K = A.shape
+        _, _, N = B.shape
+        grid = (triton.cdiv(M * batch_size, BLOCK_SIZE), 
+                triton.cdiv(N, BLOCK_SIZE))
+        strassen_2_layer_fp32_accum[grid](
+            A.reshape(-1, K), B.reshape(-1, N), C.reshape(-1, N),
+            M, N, K, A.stride(1), A.stride(2), BLOCK_SIZE)
+        return
+
+    M, K = A.shape
+    _, N = B.shape
     assert K == B.shape[0] and A.shape[0] == M and B.shape[1] == N
-    
-    grid = lambda meta: (triton.cdiv(M, meta["BLOCK_SIZE"]), triton.cdiv(N, meta["BLOCK_SIZE"]), )
+
+    grid = (triton.cdiv(M, BLOCK_SIZE), triton.cdiv(N, BLOCK_SIZE))
     strassen_2_layer_fp32_accum[grid](A, B, C, M, N, K,
-                                  A.stride(0), A.stride(1))
-    # print(krnl.metadata)
+                                     A.stride(0), A.stride(1),
+                                     BLOCK_SIZE)
 
 def run_strassen_fp32_accum(A, B, C, BLOCK_SIZE=64):
     M, N = C.shape
@@ -530,34 +540,46 @@ def run_strassen_fp32_accum(A, B, C, BLOCK_SIZE=64):
     grid = (M // BLOCK_SIZE, N // BLOCK_SIZE)
     strassen_kernel_fp32_accum[grid](A, B, C, M, N, K,
                                    A.stride(0), A.stride(1),
-                                   BLOCK_SIZE, BLOCK_SIZE // 2)
-
-
-def run_matmul_fp32_accum(A, B, C, BLOCK_SIZE=64):
-    M, N = C.shape
-    K = A.shape[1]
-    assert K == B.shape[0] and A.shape[0] == M and B.shape[1] == N
-    grid = (M // BLOCK_SIZE, N // BLOCK_SIZE)
-    matmul_kernel_fp32_accum[grid](A, B, C, M, N, K,
-                                   A.stride(0), A.stride(1),
-                                   B.stride(0), B.stride(1),
                                    BLOCK_SIZE)
 
 
-@triton.autotune(
-    configs=[
-        # triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
-        # triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
-        triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
-    ],
-    key=['M', 'N', 'K'],
-)
+def run_matmul_fp32_accum(A, B, C, BLOCK_SIZE=64):
+    if len(A.shape) == 3:  # Batched
+        batch_size, M, K = A.shape
+        _, _, N = B.shape
+        grid = (triton.cdiv(M * batch_size, BLOCK_SIZE), 
+                triton.cdiv(N, BLOCK_SIZE))
+        matmul_kernel_fp32_accum[grid](
+            A.reshape(-1, K), B.reshape(-1, N), C.reshape(-1, N),
+            M, N, K, A.stride(1), A.stride(2),
+            B.stride(1), B.stride(2), BLOCK_SIZE)
+        return
+
+    M, K = A.shape
+    _, N = B.shape
+    assert K == B.shape[0] and A.shape[0] == M and B.shape[1] == N
+
+    grid = (triton.cdiv(M, BLOCK_SIZE), triton.cdiv(N, BLOCK_SIZE))
+    matmul_kernel_fp32_accum[grid](A, B, C, M, N, K,
+                                  A.stride(0), A.stride(1),
+                                  B.stride(0), B.stride(1),
+                                  BLOCK_SIZE)
+
+
+# @triton.autotune(
+#     configs=[
+#         # triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
+#         # triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
+#         triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
+#         triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+#         triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
+#         triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
+#         triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
+#         triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
+#         triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
+#     ],
+#     key=['M', 'N', 'K'],
+# )
 @triton.jit
 def winograd_strassen_kernel_fp32_accum(
         A_ptr, B_ptr, C_ptr,
@@ -566,6 +588,7 @@ def winograd_strassen_kernel_fp32_accum(
         BLOCK_SIZE: tl.constexpr):
     HALF_BLOCK: tl.constexpr = BLOCK_SIZE // 2
 
+    # Regular grid handling like matmul
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)
 
@@ -650,15 +673,28 @@ def winograd_strassen_kernel_fp32_accum(
     tl.store(c_ptrs_22, acc_22 + C_22, mask=(row_offs2[:, None] < M) & (col_offs2[None, :] < N))
 
 
-def run_winograd_strassen(A, B, C, BLOCK_SIZE = 64):
-    M, N = C.shape
-    K = A.shape[1]
+def run_winograd_strassen(A, B, C, BLOCK_SIZE=64):
+    if len(A.shape) == 3:  # Batched
+        batch_size, M, K = A.shape
+        _, _, N = B.shape
+        # Use the same reshape strategy as matmul
+        grid = (triton.cdiv(M * batch_size, BLOCK_SIZE), triton.cdiv(N, BLOCK_SIZE))
+        winograd_strassen_kernel_fp32_accum[grid](
+            A.reshape(-1, K), B.reshape(-1, N), C.reshape(-1, N),
+            M, N, K,
+            A.stride(1), A.stride(2),  # Matrix strides
+            BLOCK_SIZE)
+        return
+
+    M, K = A.shape
+    _, N = B.shape
     assert K == B.shape[0] and A.shape[0] == M and B.shape[1] == N
 
-    grid = lambda meta: (triton.cdiv(M, meta['BLOCK_SIZE']),
-                         triton.cdiv(N, meta['BLOCK_SIZE']))
-    winograd_strassen_kernel_fp32_accum[grid](A, B, C, M, N, K,
-                                              A.stride(0), A.stride(1))
+    grid = (triton.cdiv(M, BLOCK_SIZE), triton.cdiv(N, BLOCK_SIZE))
+    winograd_strassen_kernel_fp32_accum[grid](
+        A, B, C, M, N, K,
+        A.stride(0), A.stride(1),
+        BLOCK_SIZE)
 
 
 
