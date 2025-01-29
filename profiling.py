@@ -50,7 +50,6 @@ def benchmark_matmul(
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
         dd(a, b, run_strassen_2_layer_fp32_accum, three=True)
-        # run_strassen_2_layer_fp32_accum(a, b, c, 64)
         end_events[i].record()
 
     torch.cuda.synchronize()
@@ -67,7 +66,6 @@ def benchmark_matmul(
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
         dd(a, b, run_winograd_strassen, three=True)
-        # run_strassen_fp32_accum(a, b, c)
         end_events[i].record()
 
     torch.cuda.synchronize()
@@ -82,7 +80,6 @@ def benchmark_matmul(
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
         dd(a, b, run_matmul_fp32_accum, three=True)
-        # run_matmul_fp32_accum(a, b, c)
         end_events[i].record()
 
     torch.cuda.synchronize()
@@ -94,7 +91,6 @@ def benchmark_matmul(
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
         dd(a, b, torch.matmul, three=False)
-        # torch.matmul(a, b)
         end_events[i].record()
 
     torch.cuda.synchronize()
