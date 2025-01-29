@@ -77,7 +77,7 @@ def benchmark_matrix_size(square_matrix_size, provider):
     ))
 def benchmark_batch_size(batch_size, provider):
     """Benchmark performance with different batch sizes"""
-    matrix_size = 4096  # Fixed matrix size
+    matrix_size = 8192  # Fixed matrix size
     a = torch.rand((batch_size, matrix_size, matrix_size), device='cuda', dtype=torch.float32)
     b = torch.rand((batch_size, matrix_size, matrix_size), device='cuda', dtype=torch.float32)
     c = torch.zeros((batch_size, matrix_size, matrix_size), device='cuda', dtype=torch.float32)
