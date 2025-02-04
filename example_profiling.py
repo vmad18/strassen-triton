@@ -157,5 +157,5 @@ def benchmark_flops(square_matrix_size, provider):
 
 if __name__ == '__main__':
     benchmark_matrix_size.run(save_path='./plots', show_plots=True, print_data=True)
-    benchmark_batch_size.run(save_path='./plots', show_plots=True, print_data=True)
     # benchmark_flops.run(save_path='./plots', show_plots=True, print_data=True)
+    # benchmark_batch_size.run(save_path='./plots', show_plots=True, print_data=True)
