@@ -3,7 +3,7 @@ import os
 import torch
 import torch.distributed as dist
 import time
-from strassen import run_strassen_2_layer_fp32_accum, run_matmul_fp32_accum, run_winograd_strassen
+from strassen import run_strassen2_fp32_accum, run_matmul_fp32_accum, run_winograd_strassen
 
 class DataDistributed:
     def __call__(self, a: torch.Tensor, b: torch.Tensor, func, three: bool = False) -> torch.Tensor:
@@ -34,7 +34,7 @@ def benchmark_matmul(
     dd = DataDistributed()
 
     for _ in range(num_warmup):
-        dd(a, b, run_strassen_2_layer_fp32_accum, three=True)
+        dd(a, b, run_strassen2_fp32_accum, three=True)
         dd(a, b, run_winograd_strassen, three=True)
         dd(a, b, run_matmul_fp32_accum, three=True)
         dd(a, b, torch.matmul, three=False)  # Explicitly set three=False for torch.matmul
@@ -47,7 +47,7 @@ def benchmark_matmul(
     for i in range(num_runs):
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
-        dd(a, b, run_strassen_2_layer_fp32_accum, three=True)
+        dd(a, b, run_strassen2_fp32_accum, three=True)
         end_events[i].record()
 
     torch.cuda.synchronize()
