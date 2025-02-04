@@ -19,7 +19,7 @@ from strassen import run_strassen_2_layer_fp32_accum, run_winograd_strassen, run
 @triton.testing.perf_report(
     triton.testing.Benchmark(
         x_names=['square_matrix_size'],
-        x_vals=[2 ** i for i in range(5, 12, 1)],
+        x_vals=[2 ** i for i in range(10, 16, 1)],
         x_log=True,
         line_arg='provider',
         line_vals=['strassen2', 'strassen', 'triton', 'old-winograd'],
@@ -31,9 +31,10 @@ from strassen import run_strassen_2_layer_fp32_accum, run_winograd_strassen, run
     ))
 def benchmark_matrix_size(square_matrix_size, provider):
     sz = square_matrix_size
-    a = torch.rand((sz, sz), device='cuda', dtype=torch.float32)
-    b = torch.rand((sz, sz), device='cuda', dtype=torch.float32)
-    c = torch.zeros((sz, sz), device='cuda', dtype=torch.float32)
+    bsz = 2
+    a = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
+    b = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
+    c = torch.zeros((bsz, sz, sz), device='cuda', dtype=torch.float32)
 
     quantiles = [0.5, 0.2, 0.8]
 

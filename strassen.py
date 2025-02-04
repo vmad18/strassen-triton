@@ -2,10 +2,6 @@ import triton
 import triton.language as tl
 import torch
 
-<<<<<<< HEAD
-=======
-
->>>>>>> f72035d6632a8b0afa98d2aa4c9813a14659110c
 # @triton.autotune(
 #     configs=[
 #         triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
