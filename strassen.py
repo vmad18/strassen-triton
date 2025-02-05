@@ -11,7 +11,7 @@ import torch
         triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
         triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
         triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
-        triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
+        # triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
     ],
     key=['M', 'N', 'K'],
 )
