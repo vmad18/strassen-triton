@@ -308,7 +308,7 @@ def strassen2_fp32_accum(
     tl.store(c_ptrs_43, acc_43 + C_43, mask=(row_offs4[:, None] < M) & (col_offs3[None, :] < N))
     tl.store(c_ptrs_44, acc_44 + C_44, mask=(row_offs4[:, None] < M) & (col_offs4[None, :] < N))
 
-def run_strassen2_fp32_accum(A, B, C, BLOCK_SIZE=32, **kwargs):
+def run_strassen2_fp32_accum(A, B, C, BLOCK_SIZE=64, **kwargs):
     if len(A.shape) == 3:  # Batched
         batch_size, M, K = A.shape
         _, _, N = B.shape
@@ -887,7 +887,7 @@ def old_strassen2_fp32_accum(
     tl.store(c_ptrs_43, acc_43 + C_43, mask=(row_offs4[:, None] < M) & (col_offs3[None, :] < N))
     tl.store(c_ptrs_44, acc_44 + C_44, mask=(row_offs4[:, None] < M) & (col_offs4[None, :] < N))
 
-def run_old_strassen2_fp32_accum(A, B, C, BLOCK_SIZE=32, **kwargs):
+def run_old_strassen2_fp32_accum(A, B, C, BLOCK_SIZE=64, **kwargs):
     if len(A.shape) == 3:  # Batched
         batch_size, M, K = A.shape
         _, _, N = B.shape
@@ -905,7 +905,7 @@ def run_old_strassen2_fp32_accum(A, B, C, BLOCK_SIZE=32, **kwargs):
 
     grid = (1, triton.cdiv(M, BLOCK_SIZE), triton.cdiv(N, BLOCK_SIZE))
     old_strassen2_fp32_accum[grid](A, B, C, M, N, K,
-                               1, A.stride(0), A.stride(1), **kwargs)
+                               1, A.stride(0), A.stride(1), BLOCK_SIZE, **kwargs)
 
 # if __name__ == "__main__":
 #     a = torch.randn((512, 512)).cuda()

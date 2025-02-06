@@ -26,7 +26,7 @@ else:
 @triton.testing.perf_report(
     triton.testing.Benchmark(
         x_names=['square_matrix_size'],
-        x_vals=[2 ** i for i in range(10, 17, 1)],
+        x_vals=[2 ** i for i in range(10, 15, 1)],
         x_log=True,
         line_arg='provider',
         line_vals=['strassen2', 'strassen', 'triton', 'old-winograd', 'old-strassen2'],
@@ -38,10 +38,15 @@ else:
     ))
 def benchmark_matrix_size(square_matrix_size, provider):
     sz = square_matrix_size
-    bsz = 2
-    a = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
-    b = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
-    c = torch.zeros((bsz, sz, sz), device='cuda', dtype=torch.float32)
+    bsz = 1
+    if bsz > 1:
+        a = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
+        b = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
+        c = torch.zeros((bsz, sz, sz), device='cuda', dtype=torch.float32)
+    else:
+        a = torch.rand((sz, sz), device='cuda', dtype=torch.float32)
+        b = torch.rand((sz, sz), device='cuda', dtype=torch.float32)
+        c = torch.zeros((sz, sz), device='cuda', dtype=torch.float32)
 
     quantiles = [0.5, 0.2, 0.8]
 
@@ -71,7 +76,7 @@ def benchmark_matrix_size(square_matrix_size, provider):
             quantiles=quantiles
         )
 
-    gbps = lambda ms: 12 * sz * sz / (ms * 1e6)
+    gbps = lambda ms: 12 * bsz * sz * sz / (ms * 1e6)
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 
 
