@@ -13,8 +13,15 @@ import triton
 import triton.testing
 
 import torch
-from strassen import run_strassen2_fp32_accum, run_winograd_strassen, run_matmul_fp32_accum, run_old_winograd_strassen, run_old_strassen2_fp32_accum
 
+r = input("autotuning [y/n] ")
+
+if r.lower() == "y":
+    from strassen import run_strassen2_fp32_accum, run_winograd_strassen, run_matmul_fp32_accum, \
+        run_old_winograd_strassen, run_old_strassen2_fp32_accum
+else:
+    from strassen_no_tuning import run_strassen2_fp32_accum, run_winograd_strassen, run_matmul_fp32_accum, \
+        run_old_winograd_strassen, run_old_strassen2_fp32_accum
 
 @triton.testing.perf_report(
     triton.testing.Benchmark(
