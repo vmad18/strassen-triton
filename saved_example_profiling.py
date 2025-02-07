@@ -13,8 +13,16 @@ import triton
 import triton.testing
 
 import torch
-from strassen import run_strassen_2_layer_fp32_accum, run_winograd_strassen, run_matmul_fp32_accum, run_old_winograd_strassen
 
+r = input("autotuning [y/n] ")
+# r = "n"
+
+if r.lower() == "y":
+    from strassen import run_strassen2_fp32_accum, run_winograd_strassen, run_matmul_fp32_accum, \
+        run_old_winograd_strassen, run_old_strassen2_fp32_accum
+else:
+    from strassen_no_tuning import run_strassen2_fp32_accum, run_winograd_strassen, run_matmul_fp32_accum, \
+        run_old_winograd_strassen, run_old_strassen2_fp32_accum
 
 @triton.testing.perf_report(
     triton.testing.Benchmark(
@@ -22,9 +30,11 @@ from strassen import run_strassen_2_layer_fp32_accum, run_winograd_strassen, run
         x_vals=[2 ** i for i in range(10, 16, 1)],
         x_log=True,
         line_arg='provider',
-        line_vals=['strassen2', 'strassen', 'triton', 'old-winograd'],
-        line_names=['Strassen(depth=2)', 'Strassen(depth=1)', 'Triton', 'StrassenOld(depth=1)'],
-        styles=[('blue', '-'), ('green', '-'), ('red', '-'), ('yellow', '-')],
+        line_vals=['strassen', 'triton', 'old-winograd'],
+        line_names=['Strassen(depth=1)', 'Triton', 'StrassenOld(depth=1)'],
+        # line_vals=['strassen2', 'strassen', 'triton', 'old-winograd', 'old-strassen2'],
+        # line_names=['Strassen(depth=2)', 'Strassen(depth=1)', 'Triton', 'StrassenOld(depth=1)', 'StrassenOld(depth=2)'],
+        styles=[('blue', '-'), ('green', '-'), ('red', '-'), ('yellow', '-'), ('orange', '-')],
         ylabel='GB/s',
         plot_name='matmul-performance',
         args={},
@@ -32,15 +42,25 @@ from strassen import run_strassen_2_layer_fp32_accum, run_winograd_strassen, run
 def benchmark_matrix_size(square_matrix_size, provider):
     sz = square_matrix_size
     bsz = 1
-    a = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
-    b = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
-    c = torch.zeros((bsz, sz, sz), device='cuda', dtype=torch.float32)
+    if bsz > 1:
+        a = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
+        b = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
+        c = torch.zeros((bsz, sz, sz), device='cuda', dtype=torch.float32)
+    else:
+        a = torch.rand((sz, sz), device='cuda', dtype=torch.float32)
+        b = torch.rand((sz, sz), device='cuda', dtype=torch.float32)
+        c = torch.zeros((sz, sz), device='cuda', dtype=torch.float32)
 
     quantiles = [0.5, 0.2, 0.8]
 
-    if provider == 'strassen2':
+    if provider == 'old-strassen2':
         ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: run_strassen_2_layer_fp32_accum(a, b, c),
+            lambda: run_old_strassen2_fp32_accum(a, b, c),
+            quantiles=quantiles
+        )
+    elif provider == 'strassen2':
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: run_strassen2_fp32_accum(a, b, c),
             quantiles=quantiles
         )
     elif provider == 'strassen':
@@ -59,7 +79,7 @@ def benchmark_matrix_size(square_matrix_size, provider):
             quantiles=quantiles
         )
 
-    gbps = lambda ms: 12 * sz * sz / (ms * 1e6)
+    gbps = lambda ms: 12 * bsz * sz * sz / (ms * 1e6)
     return gbps(ms), gbps(max_ms), gbps(min_ms)
 
 
@@ -69,9 +89,9 @@ def benchmark_matrix_size(square_matrix_size, provider):
         x_vals=[1, 2, 4, 8, 10, 12, 14],
         x_log=True,
         line_arg='provider',
-        line_vals=['strassen2', 'strassen', 'triton', 'old-winograd'],
-        line_names=['Strassen(depth=2)', 'Strassen(depth=1)', 'Triton', 'StrassenOld(depth=1)'],
-        styles=[('blue', '-'), ('green', '-'), ('red', '-'), ('yellow', '-')],
+        line_vals=['strassen2', 'strassen', 'triton', 'old-winograd', 'old-strassen2'],
+        line_names=['Strassen(depth=2)', 'Strassen(depth=1)', 'Triton', 'StrassenOld(depth=1)', 'StrassenOld(depth=2)'],
+        styles=[('blue', '-'), ('green', '-'), ('red', '-'), ('yellow', '-'), ('orange', '-')],
         ylabel='GB/s',
         plot_name='matmul-batch-performance',
         args={},
@@ -85,9 +105,14 @@ def benchmark_batch_size(batch_size, provider):
 
     quantiles = [0.5, 0.2, 0.8]
 
-    if provider == 'strassen2':
+    if provider == 'old-strassen2':
         ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: run_strassen_2_layer_fp32_accum(a, b, c),
+            lambda: run_old_strassen2_fp32_accum(a, b, c),
+            quantiles=quantiles
+        )
+    elif provider == 'strassen2':
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: run_strassen2_fp32_accum(a, b, c),
             quantiles=quantiles
         )
     elif provider == 'strassen':
@@ -117,9 +142,9 @@ def benchmark_batch_size(batch_size, provider):
         x_vals=[2 ** i for i in range(5, 12, 1)],
         x_log=True,
         line_arg='provider',
-        line_vals=['strassen2', 'strassen', 'triton', 'old-winograd'],
-        line_names=['Strassen(depth=2)', 'Strassen(depth=1)', 'Triton', 'StrassenOld(depth=1)'],
-        styles=[('blue', '-'), ('green', '-'), ('red', '-'), ('yellow', '-')],
+        line_vals=['strassen2', 'strassen', 'triton', 'old-winograd', 'old-strassen2'],
+        line_names=['Strassen(depth=2)', 'Strassen(depth=1)', 'Triton', 'StrassenOld(depth=1)', 'StrassenOld(depth=2)'],
+        styles=[('blue', '-'), ('green', '-'), ('red', '-'), ('yellow', '-'), ('orange', '-')],
         ylabel='FLOPs',
         plot_name='matmul-performance',
         args={},
@@ -131,9 +156,14 @@ def benchmark_flops(square_matrix_size, provider):
     c = torch.zeros((sz, sz), device='cuda', dtype=torch.float32)
 
     quantiles = [0.5, 0.2, 0.8]
-    if provider == 'strassen2':
+    if provider == 'old-strassen2':
         ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: run_strassen_2_layer_fp32_accum(a, b, c),
+            lambda: run_old_strassen2_fp32_accum(a, b, c),
+            quantiles=quantiles
+        )
+    elif provider == 'strassen2':
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: run_strassen2_fp32_accum(a, b, c),
             quantiles=quantiles
         )
     elif provider == 'strassen':

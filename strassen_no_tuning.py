@@ -137,26 +137,40 @@ def strassen2_fp32_accum(
 
         # C_11
         #####################################
+        t1 = A_21 + A_22
+        t2 = A_22 - A_12
+        t3 = A_22 - A_11
+        t4 = B_22 - B_11
+        t5 = B_21 + B_22
+        t6 = B_22 - B_12
+
         M1 = tl.dot(A_11, B_11)
         M2 = tl.dot(A_12, B_21)
-        M3 = tl.dot(A_21, B_22 - B_11)
+        M3 = tl.dot(A_21, t4)
         M4 = tl.dot(A_22, B_22)
-        M5 = tl.dot(A_21 + A_22, B_21 + B_22)
-        M6 = tl.dot(A_22 - A_12, B_22 - B_12)
-        M7 = tl.dot(A_22 - A_11, B_12)
+        M5 = tl.dot(t1, t5)
+        M6 = tl.dot(t2, t6)
+        M7 = tl.dot(t3, B_12)
 
         acc_11 += M1 + M2
         acc_12 += M5 - M7
         acc_21 += M3 + M6
         acc_22 += M5 + M6 - M2 - M4
 
+        t1 = A_23 + A_24
+        t2 = A_24 - A_14
+        t3 = A_24 - A_13
+        t4 = B_42 - B_31
+        t5 = B_41 + B_42
+        t6 = B_42 - B_32
+
         M1 = tl.dot(A_13, B_31)
         M2 = tl.dot(A_14, B_41)
-        M3 = tl.dot(A_23, B_42 - B_31)
+        M3 = tl.dot(A_23, t4)
         M4 = tl.dot(A_24, B_42)
-        M5 = tl.dot(A_23 + A_24, B_41 + B_42)
-        M6 = tl.dot(A_24 - A_14, B_42 - B_32)
-        M7 = tl.dot(A_24 - A_13, B_32)
+        M5 = tl.dot(t1, t5)
+        M6 = tl.dot(t2, t6)
+        M7 = tl.dot(t3, B_32)
 
         acc_11 += M1 + M2
         acc_12 += M5 - M7
@@ -165,26 +179,40 @@ def strassen2_fp32_accum(
 
         # C_12
         #####################################
+        t1 = A_41 + A_42
+        t2 = A_42 - A_32
+        t3 = A_42 - A_31
+        t4 = B_22 - B_11
+        t5 = B_21 + B_22
+        t6 = B_22 - B_12
+
         M1 = tl.dot(A_31, B_11)
         M2 = tl.dot(A_32, B_21)
-        M3 = tl.dot(A_41, B_22 - B_11)
+        M3 = tl.dot(A_41, t4)
         M4 = tl.dot(A_42, B_22)
-        M5 = tl.dot(A_41 + A_42, B_21 + B_22)
-        M6 = tl.dot(A_42 - A_32, B_22 - B_12)
-        M7 = tl.dot(A_42 - A_31, B_12)
+        M5 = tl.dot(t1, t5)
+        M6 = tl.dot(t2, t6)
+        M7 = tl.dot(t3, B_12)
 
         acc_31 += M1 + M2
         acc_32 += M5 - M7
         acc_41 += M3 + M6
         acc_42 += M5 + M6 - M2 - M4
 
+        t1 = A_43 + A_44
+        t2 = A_44 - A_34
+        t3 = A_44 - A_33
+        t4 = B_42 - B_31
+        t5 = B_41 + B_42
+        t6 = B_42 - B_32
+
         M1 = tl.dot(A_33, B_31)
         M2 = tl.dot(A_34, B_41)
-        M3 = tl.dot(A_43, B_42 - B_31)
+        M3 = tl.dot(A_43, t4)
         M4 = tl.dot(A_44, B_42)
-        M5 = tl.dot(A_43 + A_44, B_41 + B_42)
-        M6 = tl.dot(A_44 - A_34, B_42 - B_32)
-        M7 = tl.dot(A_44 - A_33, B_32)
+        M5 = tl.dot(t1, t5)
+        M6 = tl.dot(t2, t6)
+        M7 = tl.dot(t3, B_32)
 
         acc_33 += M1 + M2
         acc_34 += M5 - M7
@@ -193,26 +221,40 @@ def strassen2_fp32_accum(
 
         # C_21
         #####################################
+        t1 = A_21 + A_22
+        t2 = A_22 - A_12
+        t3 = A_22 - A_11
+        t4 = B_24 - B_13
+        t5 = B_23 + B_24
+        t6 = B_24 - B_14
+
         M1 = tl.dot(A_11, B_13)
         M2 = tl.dot(A_12, B_23)
-        M3 = tl.dot(A_21, B_24 - B_13)
+        M3 = tl.dot(A_21, t4)
         M4 = tl.dot(A_22, B_24)
-        M5 = tl.dot(A_21 + A_22, B_23 + B_24)
-        M6 = tl.dot(A_22 - A_12, B_24 - B_14)
-        M7 = tl.dot(A_22 - A_11, B_14)
+        M5 = tl.dot(t1, t5)
+        M6 = tl.dot(t2, t6)
+        M7 = tl.dot(t3, B_14)
 
         acc_13 += M1 + M2
         acc_14 += M5 - M7
         acc_23 += M3 + M6
         acc_24 += M5 + M6 - M2 - M4
 
+        t1 = A_23 + A_24
+        t2 = A_24 - A_14
+        t3 = A_24 - A_13
+        t4 = B_44 - B_33
+        t5 = B_43 + B_44
+        t6 = B_44 - B_34
+
         M1 = tl.dot(A_13, B_33)
         M2 = tl.dot(A_14, B_43)
-        M3 = tl.dot(A_23, B_44 - B_33)
+        M3 = tl.dot(A_23, t4)
         M4 = tl.dot(A_24, B_44)
-        M5 = tl.dot(A_23 + A_24, B_43 + B_44)
-        M6 = tl.dot(A_24 - A_14, B_44 - B_34)
-        M7 = tl.dot(A_24 - A_13, B_34)
+        M5 = tl.dot(t1, t5)
+        M6 = tl.dot(t2, t6)
+        M7 = tl.dot(t3, B_34)
 
         acc_13 += M1 + M2
         acc_14 += M5 - M7
@@ -221,26 +263,40 @@ def strassen2_fp32_accum(
 
         # C_22
         #####################################
+        t1 = A_41 + A_42
+        t2 = A_42 - A_32
+        t3 = A_42 - A_31
+        t4 = B_24 - B_13
+        t5 = B_23 + B_24
+        t6 = B_24 - B_14
+
         M1 = tl.dot(A_31, B_13)
         M2 = tl.dot(A_32, B_23)
-        M3 = tl.dot(A_41, B_24 - B_13)
+        M3 = tl.dot(A_41, t4)
         M4 = tl.dot(A_42, B_24)
-        M5 = tl.dot(A_41 + A_42, B_23 + B_24)
-        M6 = tl.dot(A_42 - A_32, B_24 - B_14)
-        M7 = tl.dot(A_42 - A_31, B_14)
+        M5 = tl.dot(t1, t5)
+        M6 = tl.dot(t2, t6)
+        M7 = tl.dot(t3, B_14)
 
         acc_33 += M1 + M2
         acc_34 += M5 - M7
         acc_43 += M3 + M6
         acc_44 += M5 + M6 - M2 - M4
 
+        t1 = A_43 + A_44
+        t2 = A_44 - A_34
+        t3 = A_44 - A_33
+        t4 = B_44 - B_33
+        t5 = B_43 + B_44
+        t6 = B_44 - B_34
+
         M1 = tl.dot(A_33, B_33)
         M2 = tl.dot(A_34, B_43)
-        M3 = tl.dot(A_43, B_44 - B_33)
+        M3 = tl.dot(A_43, t4)
         M4 = tl.dot(A_44, B_44)
-        M5 = tl.dot(A_43 + A_44, B_43 + B_44)
-        M6 = tl.dot(A_44 - A_34, B_44 - B_34)
-        M7 = tl.dot(A_44 - A_33, B_34)
+        M5 = tl.dot(t1, t5)
+        M6 = tl.dot(t2, t6)
+        M7 = tl.dot(t3, B_34)
 
         acc_33 += M1 + M2
         acc_34 += M5 - M7
@@ -326,7 +382,7 @@ def run_strassen2_fp32_accum(A, B, C, BLOCK_SIZE=64, **kwargs):
 
     grid = (1, triton.cdiv(M, BLOCK_SIZE), triton.cdiv(N, BLOCK_SIZE))
     strassen2_fp32_accum[grid](A, B, C, M, N, K,
-                               1, A.stride(0), A.stride(1), BLOCK_SIZE, **kwargs)
+                               1, A.stride(0), A.stride(1), BLOCK_SIZE, num_warps=4, **kwargs)
 
 
 ######################################################################
@@ -388,7 +444,7 @@ def run_matmul_fp32_accum(A, B, C, BLOCK_SIZE=32, **kwargs):
         A, B, C,
         M, N, K,
         1, A.stride(0), A.stride(1),
-        1, B.stride(0), B.stride(1), BLOCK_SIZE, **kwargs)
+        1, B.stride(0), B.stride(1), BLOCK_SIZE, num_warps=2, **kwargs)
 
 
 ######################################################################
@@ -442,13 +498,20 @@ def winograd_strassen_kernel_fp32_accum(
         B_21 = tl.load(b_ptrs_21, mask=(k_offs2[:, None] < K) & (col_offs1[None, :] < N), other=0.).to(tl.float16)
         B_22 = tl.load(b_ptrs_22, mask=(k_offs2[:, None] < K) & (col_offs2[None, :] < N), other=0.).to(tl.float16)
 
+        t1 = A_21 + A_22
+        t2 = A_22 - A_12
+        t3 = A_22 - A_11
+        t4 = B_22 - B_11
+        t5 = B_21 + B_22
+        t6 = B_22 - B_12
+
         M1 = tl.dot(A_11, B_11)
         M2 = tl.dot(A_12, B_21)
-        M3 = tl.dot(A_21, B_22 - B_11)
+        M3 = tl.dot(A_21, t4)
         M4 = tl.dot(A_22, B_22)
-        M5 = tl.dot(A_21 + A_22, B_21 + B_22)
-        M6 = tl.dot(A_22 - A_12, B_22 - B_12)
-        M7 = tl.dot(A_22 - A_11, B_12)
+        M5 = tl.dot(t1, t5)
+        M6 = tl.dot(t2, t6)
+        M7 = tl.dot(t3, B_12)
 
         acc_11 += M1 + M2
         acc_12 += M5 - M7
@@ -488,7 +551,7 @@ def run_winograd_strassen(A, B, C, BLOCK_SIZE=32, **kwargs):
     grid = (1, triton.cdiv(M, BLOCK_SIZE), triton.cdiv(N, BLOCK_SIZE))
     winograd_strassen_kernel_fp32_accum[grid](
         A, B, C, M, N, K,
-        1, A.stride(0), A.stride(1), BLOCK_SIZE, **kwargs)
+        1, A.stride(0), A.stride(1), BLOCK_SIZE, num_warps=2, **kwargs)
 
 
 ######################################################################
@@ -579,7 +642,7 @@ def run_old_winograd_strassen(A, B, C, BLOCK_SIZE=32, **kwargs):
         old_winograd_strassen_kernel_fp32_accum[grid](
             A, B, C,
             M, N, K,
-            A.stride(0), A.stride(1), A.stride(2), BLOCK_SIZE, **kwargs)
+            A.stride(0), A.stride(1), A.stride(2), BLOCK_SIZE, num_warps=2, **kwargs)
         return
 
     M, K = A.shape
@@ -589,7 +652,7 @@ def run_old_winograd_strassen(A, B, C, BLOCK_SIZE=32, **kwargs):
     grid = (1, triton.cdiv(M, BLOCK_SIZE), triton.cdiv(N, BLOCK_SIZE))
     old_winograd_strassen_kernel_fp32_accum[grid](
         A, B, C, M, N, K,
-        1, A.stride(0), A.stride(1), BLOCK_SIZE, **kwargs)
+        1, A.stride(0), A.stride(1), BLOCK_SIZE, num_warps=2, **kwargs)
 
 
 ######################################################################
@@ -905,7 +968,7 @@ def run_old_strassen2_fp32_accum(A, B, C, BLOCK_SIZE=64, **kwargs):
 
     grid = (1, triton.cdiv(M, BLOCK_SIZE), triton.cdiv(N, BLOCK_SIZE))
     old_strassen2_fp32_accum[grid](A, B, C, M, N, K,
-                               1, A.stride(0), A.stride(1), BLOCK_SIZE, **kwargs)
+                               1, A.stride(0), A.stride(1), BLOCK_SIZE, num_warps=2, **kwargs)
 
 # if __name__ == "__main__":
 #     a = torch.randn((512, 512)).cuda()
