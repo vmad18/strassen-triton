@@ -13,8 +13,9 @@ import triton
 import triton.testing
 
 import torch
-from strassen import run_strassen_2_layer_fp32_accum, run_winograd_strassen, run_matmul_fp32_accum, run_old_winograd_strassen
-
+# from strassen import run_strassen_2_layer_fp32_accum, run_winograd_strassen, run_matmul_fp32_accum, run_old_winograd_strassen
+from strassen import run_strassen, run_matmul_fp32_accum
+from strassen_pan import run_pan82rev_triton
 
 @triton.testing.perf_report(
     triton.testing.Benchmark(
@@ -22,9 +23,9 @@ from strassen import run_strassen_2_layer_fp32_accum, run_winograd_strassen, run
         x_vals=[2 ** i for i in range(10, 16, 1)],
         x_log=True,
         line_arg='provider',
-        line_vals=['strassen2', 'strassen', 'triton', 'old-winograd'],
-        line_names=['Strassen(depth=2)', 'Strassen(depth=1)', 'Triton', 'StrassenOld(depth=1)'],
-        styles=[('blue', '-'), ('green', '-'), ('red', '-'), ('yellow', '-')],
+        line_vals=['strassen', 'triton', 'pan'],
+        line_names=['Strassen(depth=1)', 'Triton', 'Pan(depth=1)'],
+        styles=[('blue', '-'), ('green', '-'), ('red', '-')],
         ylabel='GB/s',
         plot_name='matmul-performance',
         args={},
@@ -32,9 +33,12 @@ from strassen import run_strassen_2_layer_fp32_accum, run_winograd_strassen, run
 def benchmark_matrix_size(square_matrix_size, provider):
     sz = square_matrix_size
     bsz = 1
-    a = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
-    b = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
-    c = torch.zeros((bsz, sz, sz), device='cuda', dtype=torch.float32)
+    # a = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
+    # b = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
+    # c = torch.zeros((bsz, sz, sz), device='cuda', dtype=torch.float32)
+    a = torch.rand((sz, sz), device='cuda', dtype=torch.float32)
+    b = torch.rand((sz, sz), device='cuda', dtype=torch.float32)
+    c = torch.zeros((sz, sz), device='cuda', dtype=torch.float32)
 
     quantiles = [0.5, 0.2, 0.8]
 
@@ -45,12 +49,17 @@ def benchmark_matrix_size(square_matrix_size, provider):
         )
     elif provider == 'strassen':
         ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: run_winograd_strassen(a, b, c),
+            lambda: run_strassen(a, b, c),
             quantiles=quantiles
         )
     elif provider == 'old-winograd':
         ms, min_ms, max_ms = triton.testing.do_bench(
             lambda: run_old_winograd_strassen(a, b, c),
+            quantiles=quantiles
+        )
+    elif provider == 'pan':
+        ms, min_ms, max_ms = triton.testing.do_bench(
+            lambda: run_pan82rev_triton(a, b, c),
             quantiles=quantiles
         )
     else:  # triton
