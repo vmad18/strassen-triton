@@ -5,9 +5,10 @@ import torch
 
 @triton.autotune(
     configs=[
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=1),
         triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
         # triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
         # triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
         # triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
@@ -158,11 +159,11 @@ def strassen_2_layer_fp32_accum(
 
         M1 = tl.dot(A_11, B_11)
         M2 = tl.dot(A_12, B_21)
-        M3 = tl.dot(A_21, t4)
+        M3 = tl.dot(A_21, (B_22 - B_11))
         M4 = tl.dot(A_22, B_22)
-        M5 = tl.dot(t1, t5)
-        M6 = tl.dot(t2, t6)
-        M7 = tl.dot(t3, B_12)
+        M5 = tl.dot((A_21 + A_22), (B_21 + B_22))
+        M6 = tl.dot((A_22 - A_12), (B_22 - B_12))
+        M7 = tl.dot((A_22 - A_11), B_12)
 
         acc_11 += M1 + M2
         acc_12 += M5 - M7
@@ -400,15 +401,16 @@ def run_strassen_2_layer_fp32_accum(A, B, C, BLOCK_SIZE=64):
 ###################################
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
-        triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
-        triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=1),
+        # triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
+        # triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
+        # triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
+        # triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
+        # triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
     ],
     key=['M', 'N', 'K'],
 )
@@ -475,15 +477,16 @@ def run_matmul_fp32_accum(A, B, C, BLOCK_SIZE=32):
 ###################################
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
-        triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
-        triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=1),
+        # triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
+        # triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
+        # triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
+        # triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
+        # triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
     ],
     key=['M', 'N', 'K'],
 )
@@ -537,20 +540,13 @@ def winograd_strassen_kernel_fp32_accum(
         B_21 = tl.load(b_ptrs_21, mask=(k_offs2[:, None] < K) & (col_offs1[None, :] < N), other=0.).to(tl.float16)
         B_22 = tl.load(b_ptrs_22, mask=(k_offs2[:, None] < K) & (col_offs2[None, :] < N), other=0.).to(tl.float16)
 
-        t1 = A_21 + A_22
-        t2 = A_22 - A_12
-        t3 = A_22 - A_11
-        t4 = B_22 - B_11
-        t5 = B_21 + B_22
-        t6 = B_22 - B_12
-
         M1 = tl.dot(A_11, B_11)
         M2 = tl.dot(A_12, B_21)
-        M3 = tl.dot(A_21, t4)
+        M3 = tl.dot(A_21, (B_22 - B_11))
         M4 = tl.dot(A_22, B_22)
-        M5 = tl.dot(t1, t5)
-        M6 = tl.dot(t2, t6)
-        M7 = tl.dot(t3, B_12)
+        M5 = tl.dot((A_21 + A_22), (B_21 + B_22))
+        M6 = tl.dot((A_22 - A_12), (B_22 - B_12))
+        M7 = tl.dot((A_22 - A_11), B_12)
 
         acc_11 += M1 + M2
         acc_12 += M5 - M7
@@ -596,15 +592,16 @@ def run_winograd_strassen(A, B, C, BLOCK_SIZE=32):
 ###################################
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
-        triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
-        triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
-        triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=1),
+        # triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
+        # triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
+        # triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
+        # triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
+        # triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
+        # triton.Config({'BLOCK_SIZE': 256}, num_warps=8),
     ],
     key=['M', 'N', 'K'],
 )
