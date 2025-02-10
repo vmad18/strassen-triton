@@ -17,10 +17,19 @@ import torch
 from strassen import run_strassen, run_matmul_fp32_accum
 from strassen_pan import run_pan82rev_triton
 
+import os
+
+r = input("print best cfg [y/N] ")
+
+if r.lower() == 'y':
+    os.environ['TRITON_DEBUG'] = '1'
+    os.environ['TRITON_PRINT_AUTOTUNING'] = '1'
+
+
 @triton.testing.perf_report(
     triton.testing.Benchmark(
         x_names=['square_matrix_size'],
-        x_vals=[2 ** i for i in range(10, 16, 1)],
+        x_vals=[2 ** i for i in range(10, 15, 1)],
         x_log=True,
         line_arg='provider',
         line_vals=['strassen', 'triton', 'pan'],
@@ -32,7 +41,7 @@ from strassen_pan import run_pan82rev_triton
     ))
 def benchmark_matrix_size(square_matrix_size, provider):
     sz = square_matrix_size
-    bsz = 1
+    # bsz = 1
     # a = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
     # b = torch.rand((bsz, sz, sz), device='cuda', dtype=torch.float32)
     # c = torch.zeros((bsz, sz, sz), device='cuda', dtype=torch.float32)
@@ -101,7 +110,7 @@ def benchmark_batch_size(batch_size, provider):
         )
     elif provider == 'strassen':
         ms, min_ms, max_ms = triton.testing.do_bench(
-            lambda: run_winograd_strassen(a, b, c),
+            lambda: run_strassen(a, b, c),
             quantiles=quantiles
         )
     elif provider == 'old-winograd':

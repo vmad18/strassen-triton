@@ -143,10 +143,10 @@ def compute_correction_terms(A_bar: torch.Tensor, B_bar: torch.Tensor, C_bar: to
                 torch.stack([B_bar[i,j_bar], B_bar[i_bar,j_bar]])
             ])
             
-            C_2x2 = torch.stack([
-                torch.stack([C_bar[i,j], -C_bar[i,j_bar]]),
-                torch.stack([-C_bar[i_bar,j], lambda_coef * C_bar[i_bar,j_bar]])
-            ])
+            # C_2x2 = torch.stack([
+            #     torch.stack([C_bar[i,j], -C_bar[i,j_bar]]),
+            #     torch.stack([-C_bar[i_bar,j], lambda_coef * C_bar[i_bar,j_bar]])
+            # ])
             
             # Apply Strassen's algorithm
             correction = strassen_2x2(A_2x2, B_2x2)
@@ -241,81 +241,15 @@ def inverse_transform_matrix(A_bar: torch.Tensor) -> torch.Tensor:
     """
     return A_bar[1:-1, 1:-1]
 
-def run_pan82rev_triton(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor, BLOCK_SIZE: int = 32) -> None:
-    """
-    Run Pan82Rev algorithm using Triton kernels.
-    Updates C in-place with the result of A @ B.
-    Supports both batched and non-batched inputs.
-    """
-    if len(A.shape) == 3:  # Batched
-        batch_size, M, K = A.shape
-        _, K2, N = B.shape
-        assert K == K2, f"Inner dimensions must match: {K} != {K2}"
-        assert A.shape[0] == B.shape[0] == C.shape[0], "Batch sizes must match"
-        assert C.shape[1:] == (M, N), f"Output shape mismatch: {C.shape[1:]} != {(M, N)}"
-        assert M % 2 == 0, "Input dimension must be even"
-        assert M >= 20, "Input dimension must be at least 20 for optimal performance"
-        
-        # Step 1: Transform input matrices directly
-        A_bar = torch.zeros((batch_size, M + 2, K + 2), device=A.device, dtype=A.dtype)
-        B_bar = torch.zeros((batch_size, K + 2, N + 2), device=B.device, dtype=B.dtype)
-        C_bar = torch.zeros((batch_size, M + 2, N + 2), device=C.device, dtype=C.dtype)
-        
-        # Apply transformation for each batch
-        for i in range(batch_size):
-            A_bar[i] = transform_matrix(A[i])
-            B_bar[i] = transform_matrix(B[i])
-        
-        # Step 2: Run Pan82RevBC computation in Triton
-        grid = (batch_size, triton.cdiv(M + 2, BLOCK_SIZE), triton.cdiv(N + 2, BLOCK_SIZE))
-        
-        pan82rev_bc_kernel[grid](
-            A_bar, B_bar, C_bar,
-            M + 2, N + 2, K + 2,
-            A_bar.stride(0), A_bar.stride(1), A_bar.stride(2),
-            B_bar.stride(0), B_bar.stride(1), B_bar.stride(2),
-            C_bar.stride(0), C_bar.stride(1), C_bar.stride(2),
-            BLOCK_SIZE=BLOCK_SIZE)
-        
-        # Step 3: Transform back and store in C
-        for i in range(batch_size):
-            C[i].copy_(inverse_transform_matrix(C_bar[i]))
-        
-    else:  # Non-batched
-        M, K = A.shape
-        K2, N = B.shape
-        assert K == K2, f"Inner dimensions must match: {K} != {K2}"
-        assert C.shape == (M, N), f"Output shape mismatch: {C.shape} != {(M, N)}"
-        assert M % 2 == 0, "Input dimension must be even"
-        assert M >= 20, "Input dimension must be at least 20 for optimal performance"
-        
-        # Step 1: Transform input matrices directly
-        A_bar = transform_matrix(A)
-        B_bar = transform_matrix(B)
-        C_bar = torch.zeros((M + 2, N + 2), device=A.device, dtype=A.dtype)
-        
-        # Step 2: Run Pan82RevBC computation in Triton
-        grid = (1, triton.cdiv(M + 2, BLOCK_SIZE), triton.cdiv(N + 2, BLOCK_SIZE))
-        
-        pan82rev_bc_kernel[grid](
-            A_bar, B_bar, C_bar,
-            M + 2, N + 2, K + 2,
-            1, A_bar.stride(0), A_bar.stride(1),
-            1, B_bar.stride(0), B_bar.stride(1),
-            1, C_bar.stride(0), C_bar.stride(1),)
-            # BLOCK_SIZE=BLOCK_SIZE)
-        
-        # Step 3: Transform back and store in C
-        C.copy_(inverse_transform_matrix(C_bar))
-
 @triton.autotune(
     configs=[
         triton.Config({'BLOCK_SIZE': 32}, num_warps=1),
         triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
         triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
-        # triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
-        # triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
-        # triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=1),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
         # triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
         # triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
         # triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
@@ -357,6 +291,9 @@ def pan82rev_bc_kernel(
     offs_n = base_n + tl.arange(0, BLOCK_SIZE)
     
     # Process aggregation tables (Step b)
+    # this is going to be obviously slower, we're computing
+    # 1) a larger matrix product
+    # 2) computing this the same way we would w/ triton matmul (A dot B) + extra added computation
     for k in range(0, M, BLOCK_SIZE):
         k_offs = k + tl.arange(0, BLOCK_SIZE)
         
@@ -369,8 +306,8 @@ def pan82rev_bc_kernel(
         b_mask = (k_offs[:, None] < K) & (offs_n[None, :] < N)
         
         # Load data
-        A = tl.load(a_ptrs, mask=a_mask, other=0.0)
-        B = tl.load(b_ptrs, mask=b_mask, other=0.0)
+        A = tl.load(a_ptrs, mask=a_mask, other=0.0).to(tl.float16)
+        B = tl.load(b_ptrs, mask=b_mask, other=0.0).to(tl.float16)
         
         # Compute diagonal coefficient
         i_eq_j = offs_m[:, None] == offs_n[None, :]
@@ -390,18 +327,85 @@ def pan82rev_bc_kernel(
                 (offs_m[:, None] >= i) & (offs_m[:, None] < i+2) &
                 (offs_n[None, :] >= j) & (offs_n[None, :] < j+2)
             )
-            
+
             # Apply correction only for valid blocks
             correction_mask = block_mask & is_valid_block
             acc = tl.where(correction_mask,
                 acc * lambda_coef,
                 acc
             )
-    
+
     # Store results
     c_ptrs = C_bar_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
     tl.store(c_ptrs, acc, mask=c_mask)
+
+def run_pan82rev_triton(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor, BLOCK_SIZE: int = 32) -> None:
+    """
+    Run Pan82Rev algorithm using Triton kernels.
+    Updates C in-place with the result of A @ B.
+    Supports both batched and non-batched inputs.
+    """
+    if len(A.shape) == 3:  # Batched
+        batch_size, M, K = A.shape
+        _, K2, N = B.shape
+        assert K == K2, f"Inner dimensions must match: {K} != {K2}"
+        assert A.shape[0] == B.shape[0] == C.shape[0], "Batch sizes must match"
+        assert C.shape[1:] == (M, N), f"Output shape mismatch: {C.shape[1:]} != {(M, N)}"
+        assert M % 2 == 0, "Input dimension must be even"
+        assert M >= 20, "Input dimension must be at least 20 for optimal performance"
+
+        # Step 1: Transform input matrices directly
+        A_bar = torch.zeros((batch_size, M + 2, K + 2), device=A.device, dtype=A.dtype)
+        B_bar = torch.zeros((batch_size, K + 2, N + 2), device=B.device, dtype=B.dtype)
+        C_bar = torch.zeros((batch_size, M + 2, N + 2), device=C.device, dtype=C.dtype)
+
+        # Apply transformation for each batch
+        for i in range(batch_size):
+            A_bar[i] = transform_matrix(A[i])
+            B_bar[i] = transform_matrix(B[i])
+
+        # Step 2: Run Pan82RevBC computation in Triton
+        grid = (batch_size, triton.cdiv(M + 2, BLOCK_SIZE), triton.cdiv(N + 2, BLOCK_SIZE))
+
+        pan82rev_bc_kernel[grid](
+            A_bar, B_bar, C_bar,
+            M + 2, N + 2, K + 2,
+            A_bar.stride(0), A_bar.stride(1), A_bar.stride(2),
+            B_bar.stride(0), B_bar.stride(1), B_bar.stride(2),
+            C_bar.stride(0), C_bar.stride(1), C_bar.stride(2),
+            # BLOCK_SIZE=BLOCK_SIZE)
+        )
+        # Step 3: Transform back and store in C
+        for i in range(batch_size):
+            C[i].copy_(inverse_transform_matrix(C_bar[i]))
+
+    else:  # Non-batched
+        M, K = A.shape
+        K2, N = B.shape
+        assert K == K2, f"Inner dimensions must match: {K} != {K2}"
+        assert C.shape == (M, N), f"Output shape mismatch: {C.shape} != {(M, N)}"
+        assert M % 2 == 0, "Input dimension must be even"
+        assert M >= 20, "Input dimension must be at least 20 for optimal performance"
+
+        # Step 1: Transform input matrices directly
+        A_bar = transform_matrix(A)
+        B_bar = transform_matrix(B)
+        C_bar = torch.zeros((M + 2, N + 2), device=A.device, dtype=A.dtype)
+
+        # Step 2: Run Pan82RevBC computation in Triton
+        grid = (1, triton.cdiv(M + 2, BLOCK_SIZE), triton.cdiv(N + 2, BLOCK_SIZE))
+
+        pan82rev_bc_kernel[grid](
+            A_bar, B_bar, C_bar,
+            M + 2, N + 2, K + 2,
+            A_bar.stride(0) * A_bar.stride(1), A_bar.stride(0), A_bar.stride(1),
+            B_bar.stride(0) * B_bar.stride(1), B_bar.stride(0), B_bar.stride(1),
+            C_bar.stride(0) * C_bar.stride(1), C_bar.stride(0), C_bar.stride(1), )
+        # BLOCK_SIZE=BLOCK_SIZE)
+
+        # Step 3: Transform back and store in C
+        C.copy_(inverse_transform_matrix(C_bar))
 
 def main():
     # Test the implementation
@@ -417,10 +421,18 @@ def main():
     C_ref = torch.mm(A, B)
     
     # Compute result using our implementation
-    C_triton = run_pan82rev_triton(A, B)
-    
+    C = torch.zeros_like(A)
+    run_pan82rev_triton(A, B, C)
+
+    print(C)
+
+    print()
+
+    print(C_ref)
+
+
     # Verify results
-    max_error = torch.max(torch.abs(C_ref - C_triton))
+    max_error = torch.max(torch.abs(C_ref - C))
     print(f"Max error: {max_error:.2e}")
     assert max_error < 1e-3, "Results don't match!"
     print("Test passed!")

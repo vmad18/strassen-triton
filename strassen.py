@@ -9,7 +9,12 @@ import torch
 @triton.autotune(
     configs=[
         triton.Config({'BLOCK_SIZE': 32}, num_warps=1),
-        # triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=1),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
         # triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
         # triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
         # triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
@@ -78,8 +83,8 @@ def run_matmul_fp32_accum(A, B, C, BLOCK_SIZE=32):
     matmul_kernel_fp32_accum[grid](
         A, B, C,
         M, N, K,
-        1, A.stride(0), A.stride(1),
-        1, B.stride(0), B.stride(1))
+        A.stride(0) * A.stride(1), A.stride(0), A.stride(1),
+        B.stride(0) * B.stride(1), B.stride(0), B.stride(1))
 
 
 
@@ -87,11 +92,13 @@ def run_matmul_fp32_accum(A, B, C, BLOCK_SIZE=32):
 @triton.autotune(
     configs=[
         triton.Config({'BLOCK_SIZE': 32}, num_warps=1),
-        # triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
-        # triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
-        # triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
-        # triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
-        # triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=1),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=1),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=4),
+        triton.Config({'BLOCK_SIZE': 64}, num_warps=8),
         # triton.Config({'BLOCK_SIZE': 128}, num_warps=4),
         # triton.Config({'BLOCK_SIZE': 128}, num_warps=8),
         # triton.Config({'BLOCK_SIZE': 128}, num_warps=16),
@@ -197,5 +204,16 @@ def run_strassen(A, B, C, BLOCK_SIZE=32):
     grid = (1, triton.cdiv(M, BLOCK_SIZE), triton.cdiv(N, BLOCK_SIZE))
     strassen_kernel_fp32_accum[grid](
         A, B, C, M, N, K,
-        1, A.stride(0), A.stride(1))
+        A.stride(0) * A.stride(1), A.stride(0), A.stride(1))
 
+if __name__ == "__main__":
+    # >> comment out autotuning if you want to test the kernels <<
+    torch.manual_seed(1234)
+    a = torch.randn((512, 512)).cuda()
+    b = torch.randn((512, 512)).cuda()
+    c = torch.zeros_like(a)
+    run_strassen(a, b, c)
+    print('matmul')
+    print(c)
+    print()
+    print(a @ b)
