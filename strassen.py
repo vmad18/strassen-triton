@@ -8,6 +8,9 @@ import torch
 ###################################
 @triton.autotune(
     configs=[
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=1),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
         triton.Config({'BLOCK_SIZE': 64}, num_warps=1),
         triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
         triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
@@ -89,6 +92,9 @@ def run_matmul_fp32_accum(A, B, C, BLOCK_SIZE=32):
 ###################################
 @triton.autotune(
     configs=[
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=1),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=2),
+        triton.Config({'BLOCK_SIZE': 32}, num_warps=4),
         triton.Config({'BLOCK_SIZE': 64}, num_warps=1),
         triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
         triton.Config({'BLOCK_SIZE': 64}, num_warps=2),
