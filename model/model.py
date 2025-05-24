@@ -67,9 +67,9 @@ class GPT(Module):
     def forward(self, x: Tensor, 
                 shift: int = 0, 
                 temp: float = 1.) -> Tensor:
+        mask = self._gen_mask(x, shift)
         x = self.embed(x)
         
-        mask = self._gen_mask(x, shift)
        
         for block in self.blocks:
             x = block(x, mask, shift)
