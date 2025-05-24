@@ -120,7 +120,7 @@ def collate_fn(batch):
 lyrics_dataset = LyricsLineDataset(numbered_lines, encode, EOS_TOKEN_ID)
 dataloader = DataLoader(lyrics_dataset, batch_size=8, shuffle=True, collate_fn=collate_fn)
 
-DIM = 4096
+DIM = 512
 HEADS = 8
 NUM_LAYERS = 4
 DEVICE = "cuda"
