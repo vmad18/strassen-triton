@@ -15,16 +15,16 @@ def _strassen_base(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     mid = n // 2
 
     # Split A into quadrants
-    A11 = A[:mid, :mid]
-    A12 = A[:mid, mid:]
-    A21 = A[mid:, :mid]
-    A22 = A[mid:, mid:]
+    A11 = A[..., :mid, :mid]
+    A12 = A[..., :mid, mid:]
+    A21 = A[..., mid:, :mid]
+    A22 = A[..., mid:, mid:]
 
     # Split B into quadrants
-    B11 = B[:mid, :mid]
-    B12 = B[:mid, mid:]
-    B21 = B[mid:, :mid]
-    B22 = B[mid:, mid:]
+    B11 = B[..., :mid, :mid]
+    B12 = B[..., :mid, mid:]
+    B21 = B[..., mid:, :mid]
+    B22 = B[..., mid:, mid:]
 
     # Compute the 7 products using torch.mm (Base Case for the 2nd layer)
     M1 = torch.mm(A11 + A22, B11 + B22)
@@ -61,15 +61,13 @@ def strassen_matmul_two_layers(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor
     """
     n = A.shape[0]
 
-    # --- Input Validation ---
-    if n != B.shape[0] or A.shape[1] != B.shape[0] or A.shape[0] != A.shape[1]:
-        raise ValueError("Input matrices must be square and have the same dimensions.")
-    if n % 4 != 0:
-        raise ValueError("Matrix size must be divisible by 4 for two Strassen layers.")
-    if not n > 0:
-         raise ValueError("Matrix size must be positive.")
+    # if n != B.shape[0] or A.shape[1] != B.shape[0] or A.shape[0] != A.shape[1]:
+    #     raise ValueError("Input matrices must be square and have the same dimensions.")
+    # if n % 4 != 0:
+    #     raise ValueError("Matrix size must be divisible by 4 for two Strassen layers.")
+    # if not n > 0:
+    #      raise ValueError("Matrix size must be positive.")
 
-    # --- Level 1 Split ---
     mid_l1 = n // 2
     A11 = A[:mid_l1, :mid_l1]
     A12 = A[:mid_l1, mid_l1:]
@@ -81,7 +79,6 @@ def strassen_matmul_two_layers(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor
     B21 = B[mid_l1:, :mid_l1]
     B22 = B[mid_l1:, mid_l1:]
 
-    # --- Level 1 Intermediate Additions/Subtractions ---
     S1 = B12 - B22
     S2 = A11 + A12
     S3 = A21 + A22

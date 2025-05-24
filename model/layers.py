@@ -4,9 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch import Tensor
-from torch import Module 
 
-from ..fixed_strassen import strassen_matmul_two_layers, _strassen_base  
+from fixed_strassen import strassen_matmul_two_layers, _strassen_base  
 
 from typing import Optional, Tuple
 
@@ -49,14 +48,15 @@ def causal_mask(
         S: int,
         W: int,
         shift: int | None = 1,
-        value: float | None = None 
+        value: float | None = None,
+        device: str = "cuda"
     ) -> Tensor:
     shift = shift if shift != None else 1
     value = value if value != None else float("-inf") # torch.finfo(torch.get_default_dtype()).min
-    mask = torch.full((S, W), fill_value=value).triu(diagonal=shift)
+    mask = torch.full((S, W), fill_value=value).triu(diagonal=shift).to(device)
     return mask
 
-class RoPE(Module):
+class RoPE(nn.Module):
 
     def __init__(self,
                  head_dim: int, 
@@ -118,14 +118,38 @@ class RoPE(Module):
         return rq.reshape(*rq.shape[:-2], d).to(dtype), rk.reshape(*rk.shape[:-2], d).to(dtype)
 
 
-class CausalAttention(Module):
+class PositionalEncoding(nn.Module):
+
+    def __init__(self,
+                 dim: int,
+                 max_tokens: int, 
+                 device: str = "cuda"
+                ) -> None:
+        super().__init__()
+
+        self.pos = torch.arange(0, max_tokens, device=device)[..., None]
+
+        self.freqs = self.pos * \
+                     torch.exp(-log(1e4) * torch.arange(0, dim, 2, device=device) / dim)[
+                         None, ...]
+
+        self.pos = torch.zeros((max_tokens, dim), device=device)
+        self.pos[..., ::2] = self.freqs.sin()
+        self.pos[..., 1::2] = self.freqs.cos()
+        self.pos = self.pos[None, ...]
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x + self.pos[0, :x.shape[-2]]
+
+
+class CausalAttention(nn.Module):
     def __init__(self,
                  dim: int,
                  heads: int,
                  max_tokens: int, 
                  bias: bool = False,
                  base: int = int(1e4),
-                 drop_r: float = .1,
+                 drop_r: float = 0,
                  device: str = "cuda",
                  layer_idx: Optional[int] = None):
         super().__init__()
@@ -133,7 +157,8 @@ class CausalAttention(Module):
         self.h = heads
 
         self.to_q = nn.Linear(dim, dim, bias=bias, device=device)
-        self.to_kv = nn.Linear(dim, 2 * dim, bias=bias, device=device)
+        self.to_k = nn.Linear(dim, dim, bias=bias, device=device)
+        self.to_v = nn.Linear(dim, dim, bias=bias, device=device)
         self.o_proj = nn.Linear(dim, dim, device=device)
     
         self.drop_r = drop_r
@@ -150,9 +175,10 @@ class CausalAttention(Module):
         b, s, *_ = x.shape
 
         if ctx is None:
-            qkv = (self.to_q(x), *self.to_kv(x).chunk(2, -1))
+            qkv = (self.to_q(x), self.to_k(x), self.to_v(x))
         else:
             qkv = (self.to_q(x), *self.to_kv(ctx).chunk(2, -1))
+            
         q, k, v = map(
             lambda w: rearrange(w, "b s (h d) -> b h s d", h=self.h),
             qkv
@@ -163,7 +189,7 @@ class CausalAttention(Module):
         return F.dropout(x, p=self.drop_r, training=True)
 
 
-class FeedForward(Module):
+class FeedForward(nn.Module):
 
     def __init__(self, 
                  dim: int,
@@ -186,11 +212,22 @@ class FeedForward(Module):
         self.nl = nl
         self.layer_idx = layer_idx
 
+        self.use_gate = gate
+
     def forward(self, x: Tensor) -> Tensor:
         o, gate = self.proj_up(x), self.gate(x)
-        return self.proj_down(self.nl(o) * gate)
+        if self.use_gate:
+            return self.proj_down(self.nl(o) * gate)
+        return self.proj_down(self.nl(o))
 
 
+
+'''
+
+Strassen can only be applied when for an input x in BxSxD, BxS <= D and we have to pad the input so that BxS == D.
+Moreover, D has to be a power of 2 (as we already know).
+
+'''
 
 class LinearStrassen(nn.Linear):
     def __init__(self, 
@@ -198,23 +235,69 @@ class LinearStrassen(nn.Linear):
                  out_features: int, 
                  bias: bool = True,
                  dtype=None, 
-                 depth: int = 2, 
+                 depth: int = 1, 
                  device: str = "cuda") -> None:
         assert in_features == out_features and (log2(in_features)).is_integer(), "Transform must be square and a power of 2"
         
         super().__init__(in_features, out_features, bias, device, dtype)
         self.depth = depth 
+        self.strassen_func = strassen_matmul_two_layers if depth == 2 else _strassen_base
 
+    def forward(self, input: Tensor):
+        *batch_dims, D_in = input.shape
+        assert D_in == self.in_features, "Input dim mismatch"
+        D = self.in_features
+        M = input.numel() // D
+        input_reshaped = input.view(M, D)
+        W_T = self.weight.T
 
-    def forward(self, input: Tensor) -> Tensor:
-        if self.depth == 1:
-            out = _strassen_base(input, self.weight.T)
-        else:
-            out = strassen_matmul_two_layers(input, self.weight.T)
+        # --- Constraint ---
+        if M > D:
+            raise ValueError(
+                f"Input M ({M}) > D ({D}). Cannot pad input to DxD. "
+                f"You MUST use the method that pads BOTH input and weights to PxP."
+            )
+
+        pad_rows_x = D - M 
+        X_padded = F.pad(input_reshaped, (0, 0, 0, pad_rows_x), "constant", 0)
+
+        out_padded = self.strassen_func(X_padded, W_T)
+
+        out_reshaped = out_padded[:M, :D]
+
+        output_shape = (*batch_dims, D)
+        out = out_reshaped.view(output_shape)
+
         if self.bias is not None:
-            out += self.bias 
-        return out 
+            out = out + self.bias
+            
+        return out
 
+
+        
+
+def replace_linear_with_strassen(module: nn.Module, min_size: int = 128, depth: int = 1):
+    for name, child in module.named_children():
+        if isinstance(child, nn.Linear) and not isinstance(child, LinearStrassen):
+            if child.in_features == child.out_features and child.in_features >= min_size:
+                print(f"Replacing '{name}' with LinearStrassen.")
+                new_layer = LinearStrassen(
+                    child.in_features,
+                    child.out_features,
+                    bias=child.bias is not None,
+                    device=child.weight.device,
+                    dtype=child.weight.dtype,
+                    depth=depth
+                )
+                # Copy weights and bias
+                new_layer.weight.data.copy_(child.weight.data)
+                if child.bias is not None:
+                    new_layer.bias.data.copy_(child.bias.data)
+                setattr(module, name, new_layer)
+            else:
+                 print(f"Skipping '{name}': Not square or too small.")
+        elif len(list(child.children())) > 0:
+            replace_linear_with_strassen(child, min_size, depth)
 
 
 
