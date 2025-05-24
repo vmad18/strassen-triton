@@ -1,2 +1,2 @@
 # strassen-triton
-Strassen's Algorithm Implemented in Triton
+Strassen's Algorithm Implemented ~~in Triton~~
