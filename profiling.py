@@ -3,7 +3,10 @@ import os
 import torch
 import torch.distributed as dist
 import time
-from strassen import run_strassen2_fp32_accum, run_matmul_fp32_accum, run_winograd_strassen
+from strassen import run_strassen2, run_matmul_fp32_accum, run_strassen, strassen_matmul_two_layers
+
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
 class DataDistributed:
     def __call__(self, a: torch.Tensor, b: torch.Tensor, func, three: bool = False) -> torch.Tensor:
@@ -34,8 +37,8 @@ def benchmark_matmul(
     dd = DataDistributed()
 
     for _ in range(num_warmup):
-        dd(a, b, run_strassen2_fp32_accum, three=True)
-        dd(a, b, run_winograd_strassen, three=True)
+        dd(a, b, strassen_matmul_two_layers, three=False)
+        dd(a, b, run_strassen, three=True)
         dd(a, b, run_matmul_fp32_accum, three=True)
         dd(a, b, torch.matmul, three=False)  # Explicitly set three=False for torch.matmul
 
@@ -47,7 +50,7 @@ def benchmark_matmul(
     for i in range(num_runs):
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
-        dd(a, b, run_strassen2_fp32_accum, three=True)
+        dd(a, b, strassen_matmul_two_layers, three=False)
         end_events[i].record()
 
     torch.cuda.synchronize()
@@ -63,7 +66,7 @@ def benchmark_matmul(
         c.zero_()
         torch.cuda._sleep(1_000_000)
         start_events[i].record()
-        dd(a, b, run_winograd_strassen, three=True)
+        dd(a, b, run_strassen, three=True)
         end_events[i].record()
 
     torch.cuda.synchronize()
@@ -131,14 +134,14 @@ def profile_mats():
     sizes = [4096, 8192, 16384, 32768, 65536]
 
     print(
-        f"{'Size':>6}| {'Strassen2':>10} | {'Strassen':>10} | {'Triton_MM':>10} | {'PyTorch':>10} | {'Strassen2_Speedup':>8} | {'Strassen_Speedup':>8} | {'Triton Speedup':>8} | {'Max Diff':>8} | {'TF/s':>6}")
-    print("-" * 100)
+        f"{'Size':>6}| {'Strassen (torch.compile)':>10} | {'Strassen (Triton)':>10} | {'Triton_MM':>10} | {'PyTorch':>10} | {'Strassen_Speedup (torch.compile)':>8} | {'Strassen_Speedup (Triton)':>8} | {'Triton Speedup':>8} | {'Max Diff':>8} | {'TF/s':>6}")
+    print("-" * 150)
 
     for size in sizes:
         results = benchmark_matmul(
             M=size, N=size, K=size,
-            num_warmup=10,
-            num_runs=50
+            num_warmup=1,
+            num_runs=2
         )
 
         print(f"{size:>6} | "
@@ -157,3 +160,4 @@ if __name__ == "__main__":
     print(torch.cuda.is_available())
     print("\nProfiling different matrix sizes:")
     profile_mats()
+
