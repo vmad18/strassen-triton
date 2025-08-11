@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from math import log2, sqrt
 
 # neva shoulda used triton :(
-# @torch.compile
+@torch.compile
 def _strassen_base(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     """
     Performs one layer of Strassen's matrix multiplication.
@@ -54,7 +54,7 @@ def _strassen_base(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
         torch.hstack([C21, C22])
     ])
 
-# @torch.compile
+@torch.compile
 def strassen_matmul_n_layers(A: torch.Tensor, B: torch.Tensor, n_depth: int = 2) -> torch.Tensor:
     """
     Performs Strassen's matrix multiplication unrolled for two layers.
