@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,7 +9,42 @@ import math
 
 from triton.testing import do_bench
 
-from fixed_strassen import strassen_matmul_n_layers
+
+USE_AGG: bool = True
+USE_TF32: bool = True
+
+
+if USE_AGG:
+    from fixed_strassen_fp32_agg import strassen_matmul_n_layers, agg_dtype
+    # agg_dtype = torch.float64 # this does not work, have to manually change it in the fixed_strassen_fp32_agg code 
+    print(f"==> Using high precision aggregation with {agg_dtype}")
+else:
+    from fixed_strassen import strassen_matmul_n_layers
+    print("==> Not using aggregation")
+
+
+if USE_TF32:
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    
+    # get tf32 to work on amd gpus
+    os.environ["TORCH_BLAS_PREFER_HIPBLASLT"] = "1"
+    os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.set_float32_matmul_precision('high')
+
+    print("==> Using TF32")
+else:
+    print("==> NOT using TF32")
+
+
+
+torch._dynamo.reset()
+
+torch.backends.cudnn.benchmark = True
+
 
 class LinearStrassen(nn.Linear):
     def __init__(self,
@@ -22,6 +59,7 @@ class LinearStrassen(nn.Linear):
         super().__init__(features, features, bias=bias, device=device, dtype=dtype)
         self.depth = depth
         self.to(device=device, dtype=dtype)
+        self.base_dtype = dtype
 
     def forward(self, input_tensor: Tensor) -> Tensor:
         *batch_dims, D_in = input_tensor.shape 
@@ -42,7 +80,7 @@ class LinearStrassen(nn.Linear):
         else: 
             X_padded = input_reshaped # X_padded is (D,D)
 
-        out_padded = strassen_matmul_n_layers(X_padded, W_T, n_depth=self.depth)
+        out_padded = strassen_matmul_n_layers(X_padded, W_T, n_depth=self.depth, base_dtype=self.base_dtype)
 
         out_unpadded = out_padded[:M, :D]
 
@@ -51,6 +89,7 @@ class LinearStrassen(nn.Linear):
             out = out + self.bias  
         return out
 
+@torch.no_grad()
 def benchmark_linear_layers(
     N_dim: int,           
     strassen_depth: int,
@@ -64,6 +103,8 @@ def benchmark_linear_layers(
     Benchmarks LinearStrassen (NxN input) against nn.Linear (NxN input).
     N_dim must be a power of 2.
     """
+    # torch._dynamo.reset()
+
     assert (N_dim > 0) and ((N_dim & (N_dim - 1)) == 0), "N_dim (features) must be a power of 2."
 
     results = {
@@ -79,9 +120,33 @@ def benchmark_linear_layers(
         linear_std = nn.Linear(N_dim, N_dim, bias=use_bias, device=device, dtype=dtype)
         linear_strassen = LinearStrassen(features=N_dim, bias=use_bias, dtype=dtype, 
                                          depth=strassen_depth, device=device)
-        linear_std.compile()
-        linear_strassen.compile()
         
+        
+        # linear_std.compile(mode="max-autotune")
+        # linear_strassen.compile(mode="max-autotune")
+       
+        linear_std = torch.compile(
+                                linear_std,
+                                backend="inductor",
+                                mode="max-autotune",
+                                # fullgraph=True,
+                                # dynamic=False,
+                            )
+
+        linear_strassen = torch.compile(
+                        linear_strassen,
+                        backend="inductor",
+                        mode="max-autotune",
+                        # fullgraph=True,
+                        # dynamic=False,
+                    )
+
+       # linear_std = torch.compile(linear_std, mode = "max-autotune-no-cudagraphs")
+        # linear_strassen = torch.compile(linear_strassen, mode = "max-autotune-no-cudagraphs")
+
+        linear_std.eval()
+        linear_strassen.eval()
+
         linear_strassen.weight.data.copy_(linear_std.weight.data)
         if use_bias and linear_std.bias is not None: # Check if bias actually exists
             linear_strassen.bias.data.copy_(linear_std.bias.data)
@@ -96,9 +161,9 @@ def benchmark_linear_layers(
     print(f"  Performing correctness check (N_dim={N_dim}, Depth={strassen_depth})...")
     try:
         with torch.no_grad():
-            out_std = linear_std(input_x)
-            out_strassen = linear_strassen(input_x)
-        
+            out_std = linear_std(input_x).clone()
+            out_strassen = linear_strassen(input_x).clone()
+
         abs_diff = torch.abs(out_std - out_strassen)
         results['max_abs_diff'] = torch.max(abs_diff).item()
         results['allclose'] = torch.allclose(out_std, out_strassen)
@@ -112,8 +177,8 @@ def benchmark_linear_layers(
     print(f"  JIT Warm-up (1 run per function)...")
     try:
         with torch.no_grad():
-            _ = linear_std(input_x)
-            _ = linear_strassen(input_x)
+            _ = linear_std(input_x).clone()
+            _ = linear_strassen(input_x).clone()
         torch.cuda.synchronize()
     except Exception as e:
         print(f"    Error during JIT warmup: {e}")
@@ -126,7 +191,7 @@ def benchmark_linear_layers(
 
     with torch.no_grad():
         try:
-            fn_std = lambda: linear_std(input_x)
+            fn_std = lambda: linear_std(input_x).clone()
             times_std_ms_list = do_bench(fn_std, warmup=num_warmup, rep=num_runs, return_mode="all")
             if times_std_ms_list:
                 results['std_mean_ms'] = sum(times_std_ms_list) / len(times_std_ms_list)
@@ -141,7 +206,7 @@ def benchmark_linear_layers(
             results['error_bench_std'] = str(e)
 
         try:
-            fn_strassen = lambda: linear_strassen(input_x)
+            fn_strassen = lambda: linear_strassen(input_x).clone()
             times_strassen_ms_list = do_bench(fn_strassen, warmup=num_warmup, rep=num_runs, return_mode="all")
             if times_strassen_ms_list:
                 results['strassen_mean_ms'] = sum(times_strassen_ms_list) / len(times_strassen_ms_list)
@@ -176,10 +241,10 @@ def profile_linear_layers():
         # (128, 1), 
         # (256, 1), (256, 2), 
         # (512, 1), (512, 2), 
-        # (1024, 1), (1024, 2),
+        (1024, 1), (1024, 2),
         (2048, 1), (2048, 2),
         (4096, 1), (4096, 2),
-        (8192, 1), (8192, 2),
+        (8192, 1), (8192, 2),  (8192, 3), # (8192, 4),
         (8192*2, 1), (8192*2, 2), (8192*2, 3), # (8192*2, 4),
         (8192*4, 1), (8192*4, 2), (8192*4, 3), (8192*4, 4)# , (8192*4, 5),
     ]
@@ -202,10 +267,10 @@ def profile_linear_layers():
         current_runs = num_runs_base
         current_warmup = num_warmup_base
         if N_dim >= 1024:
-            current_runs = 50
+            current_runs = 350
             current_warmup = 10
         if N_dim >= 2048:
-            current_runs = 50
+            current_runs = 350
             current_warmup = 10
         if N_dim >= 4096: # For very large cases, fewer runs
             current_runs = 50
@@ -239,4 +304,5 @@ if __name__ == "__main__":
         print("CUDA is not available. Aborting benchmark.")
     else:
         print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+        torch.cuda.empty_cache()
         profile_linear_layers()

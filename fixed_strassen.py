@@ -68,7 +68,7 @@ def strassen_matmul_n_layers(A: torch.Tensor, B: torch.Tensor, n_depth: int = 2)
     """
     
     if n_depth == 1:
-        return _strassen_base(A, B)
+        return _strassen_base(A, B, base_dtype)
 
     n = A.shape[0]
 
@@ -95,22 +95,21 @@ def strassen_matmul_n_layers(A: torch.Tensor, B: torch.Tensor, n_depth: int = 2)
     S10 = B11 + B12
     
     if mid_l1 == 2 or n_depth == 2:
-        M1 = _strassen_base(S5, S6)  # M1 = (A11 + A22) * (B11 + B22)
-        M2 = _strassen_base(S3, B11) # M2 = (A21 + A22) * B11
-        M3 = _strassen_base(A11, S1) # M3 = A11 * (B12 - B22)
-        M4 = _strassen_base(A22, S4) # M4 = A22 * (B21 - B11)
-        M5 = _strassen_base(S2, B22) # M5 = (A11 + A12) * B22
-        M6 = _strassen_base(S9, S10)# M6 = (A21 - A11) * (B11 + B12)
-        M7 = _strassen_base(S7, S8)  # M7 = (A12 - A22) * (B21 + B22)
+        M1 = _strassen_base(S5, S6)
+        M2 = _strassen_base(S3, B11)
+        M3 = _strassen_base(A11, S1)
+        M4 = _strassen_base(A22, S4)
+        M5 = _strassen_base(S2, B22)
+        M6 = _strassen_base(S9, S10)
+        M7 = _strassen_base(S7, S8)
     else:
-        M1 = strassen_matmul_n_layers(S5, S6, n_depth-1)  # M1 = (A11 + A22) * (B11 + B22)
-        M2 = strassen_matmul_n_layers(S3, B11, n_depth-1) # M2 = (A21 + A22) * B11
-        M3 = strassen_matmul_n_layers(A11, S1, n_depth-1) # M3 = A11 * (B12 - B22)
-        M4 = strassen_matmul_n_layers(A22, S4, n_depth-1) # M4 = A22 * (B21 - B11)
-        M5 = strassen_matmul_n_layers(S2, B22, n_depth-1) # M5 = (A11 + A12) * B22
-        M6 = strassen_matmul_n_layers(S9, S10, n_depth-1)# M6 = (A21 - A11) * (B11 + B12)
-        M7 = strassen_matmul_n_layers(S7, S8, n_depth-1)  # M7 = (A12 - A22) * (B21 + B22)
-
+        M1 = strassen_matmul_n_layers(S5, S6, n_depth-1)
+        M2 = strassen_matmul_n_layers(S3, B11, n_depth-1)
+        M3 = strassen_matmul_n_layers(A11, S1, n_depth-1)
+        M4 = strassen_matmul_n_layers(A22, S4, n_depth-1)
+        M5 = strassen_matmul_n_layers(S2, B22, n_depth-1)
+        M6 = strassen_matmul_n_layers(S9, S10, n_depth-1)
+        M7 = strassen_matmul_n_layers(S7, S8, n_depth-1)
 
     C11 = M1 + M4 - M5 + M7
     C12 = M3 + M5
@@ -171,8 +170,8 @@ class LinearStrassen(nn.Linear):
 
 
 if __name__ == "__main__":
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
+    # torch.backends.cuda.matmul.allow_tf32 = True
+    # torch.backends.cudnn.allow_tf32 = True
     D = 64
     A = torch.randn((D, D)).cuda()
     B = torch.randn((D, D)).cuda()
