@@ -16,7 +16,7 @@ USE_TF32: bool = True
 
 if USE_AGG:
     from fixed_strassen_fp32_agg import strassen_matmul_n_layers, agg_dtype
-    # agg_dtype = torch.float64 # this does not work, have to manually change it in the fixed_strassen_fp32_agg code 
+    # agg_dtype = torch.float64 # this does not work, have to manually change it in the fixed_strassen_fp32_agg.py code 
     print(f"==> Using high precision aggregation with {agg_dtype}")
 else:
     from fixed_strassen import strassen_matmul_n_layers
