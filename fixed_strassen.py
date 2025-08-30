@@ -9,11 +9,13 @@ from math import log2, sqrt
 
 # neva shoulda used triton :(
 @torch.compile
-def _strassen_base(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+def _strassen_base(A: torch.Tensor, B: torch.Tensor, base_dtype = torch.float32) -> torch.Tensor:
     """
     Performs one layer of Strassen's matrix multiplication.
     This will be the 'base case' for our two-layer unroll,
     using torch.mm for the N/4 x N/4 multiplications.
+    
+    - ignores base_dtype in this file.
     """
     if A.shape[0] <= 16: # Or some other threshold where standard mm is faster
         return torch.mm(A, B)
@@ -34,19 +36,19 @@ def _strassen_base(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     B22 = B[..., mid:, mid:]
 
     # Compute the 7 products using torch.mm (Base Case for the 2nd layer)
-    M1 = torch.mm(A11 + A22, B11 + B22)
-    M2 = torch.mm(A21 + A22, B11)
-    M3 = torch.mm(A11, B12 - B22)
-    M4 = torch.mm(A22, B21 - B11)
-    M5 = torch.mm(A11 + A12, B22)
-    M6 = torch.mm(A21 - A11, B11 + B12)
-    M7 = torch.mm(A12 - A22, B21 + B22)
+    M1 = torch.mm((A11 + A22), (B11 + B22))
+    M2 = torch.mm((A21 + A22), B11)
+    M3 = torch.mm(A11, (B12 - B22))
+    M4 = torch.mm(A22, (B21 - B11))
+    M5 = torch.mm((A11 + A12), B22)
+    M6 = torch.mm((A21 - A11), (B11 + B12))
+    M7 = torch.mm((A12 - A22), (B21 + B22))
 
     # Compute the quadrants of the result
-    C11 = M1 + M4 - M5 + M7
-    C12 = M3 + M5
-    C21 = M2 + M4
-    C22 = M1 - M2 + M3 + M6
+    C11 = (M1 + M4 - M5 + M7)
+    C12 = (M3 + M5)
+    C21 = (M2 + M4)
+    C22 = (M1 - M2 + M3 + M6)
 
     # Combine the quadrants
     return torch.vstack([
@@ -55,7 +57,7 @@ def _strassen_base(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     ])
 
 @torch.compile
-def strassen_matmul_n_layers(A: torch.Tensor, B: torch.Tensor, n_depth: int = 2) -> torch.Tensor:
+def strassen_matmul_n_layers(A: torch.Tensor, B: torch.Tensor, n_depth: int = 2, base_dtype = torch.float32) -> torch.Tensor:
     """
     Performs Strassen's matrix multiplication unrolled for two layers.
 
@@ -83,16 +85,16 @@ def strassen_matmul_n_layers(A: torch.Tensor, B: torch.Tensor, n_depth: int = 2)
     B21 = B[mid_l1:, :mid_l1]
     B22 = B[mid_l1:, mid_l1:]
 
-    S1 = B12 - B22
-    S2 = A11 + A12
-    S3 = A21 + A22
-    S4 = B21 - B11
-    S5 = A11 + A22
-    S6 = B11 + B22
-    S7 = A12 - A22
-    S8 = B21 + B22
-    S9 = A21 - A11
-    S10 = B11 + B12
+    S1 = (B12 - B22)
+    S2 = (A11 + A12)
+    S3 = (A21 + A22)
+    S4 = (B21 - B11)
+    S5 = (A11 + A22)
+    S6 = (B11 + B22)
+    S7 = (A12 - A22)
+    S8 = (B21 + B22)
+    S9 = (A21 - A11)
+    S10 = (B11 + B12)
     
     if mid_l1 == 2 or n_depth == 2:
         M1 = _strassen_base(S5, S6)
@@ -111,10 +113,10 @@ def strassen_matmul_n_layers(A: torch.Tensor, B: torch.Tensor, n_depth: int = 2)
         M6 = strassen_matmul_n_layers(S9, S10, n_depth-1)
         M7 = strassen_matmul_n_layers(S7, S8, n_depth-1)
 
-    C11 = M1 + M4 - M5 + M7
-    C12 = M3 + M5
-    C21 = M2 + M4
-    C22 = M1 - M2 + M3 + M6
+    C11 = (M1 + M4 - M5 + M7)
+    C12 = (M3 + M5)
+    C21 = (M2 + M4)
+    C22 = (M1 - M2 + M3 + M6)
 
     C = torch.vstack([
         torch.hstack([C11, C12]),
@@ -122,7 +124,6 @@ def strassen_matmul_n_layers(A: torch.Tensor, B: torch.Tensor, n_depth: int = 2)
     ])
 
     return C
-
 
 class LinearStrassen(nn.Linear):
     def __init__(self, 
@@ -181,4 +182,3 @@ if __name__ == "__main__":
     # s_lin.compile()
     print(lin(A))
     print(s_lin(A))
-
