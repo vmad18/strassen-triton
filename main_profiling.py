@@ -10,9 +10,8 @@ import math
 from triton.testing import do_bench
 
 
-USE_AGG: bool = True
+USE_AGG: bool = False
 USE_TF32: bool = True
-
 
 if USE_AGG:
     from fixed_strassen_fp32_agg import strassen_matmul_n_layers, agg_dtype
@@ -23,20 +22,23 @@ else:
     print("==> Not using aggregation")
 
 
-if USE_TF32:
-    torch.backends.cuda.matmul.allow_tf32 = True
-    torch.backends.cudnn.allow_tf32 = True
-    
-    # get tf32 to work on amd gpus
-    os.environ["TORCH_BLAS_PREFER_HIPBLASLT"] = "1"
-    os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+if torch.version.hip is not None:
+  # get tf32 to work on amd gpus
+  os.environ["TORCH_BLAS_PREFER_HIPBLASLT"] = "1"
+  os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+  print(f"==> Using AMD HIP Backend")
 
+if USE_TF32:
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.set_float32_matmul_precision('high')
 
     print("==> Using TF32")
 else:
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.set_float32_matmul_precision('highest')
+
     print("==> NOT using TF32")
 
 
